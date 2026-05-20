@@ -361,12 +361,14 @@ impl LocalLinkUi {
                 self.send_job(ApiJob::Peers);
                 self.send_job(ApiJob::Trusted);
                 self.send_job(ApiJob::Connections);
+                self.send_job(ApiJob::Addons);
             }
             "disconnect" => {
                 self.log("Disconnected.");
                 self.send_job(ApiJob::Peers);
                 self.send_job(ApiJob::Trusted);
                 self.send_job(ApiJob::Connections);
+                self.send_job(ApiJob::Addons);
             }
             "reload_addons" => {
                 self.log("Add-ons reloaded.");
@@ -476,6 +478,8 @@ impl LocalLinkUi {
                 });
             }
         }
+
+        self.reconcile_addon_processes();
     }
 
     fn apply_events(&mut self, v: Value) {
@@ -501,6 +505,67 @@ impl LocalLinkUi {
 
         if count > 0 {
             self.log(format!("Loaded {count} activity item(s)."));
+        }
+    }
+
+    fn reconcile_addon_processes(&mut self) {
+        // 1. Drop processes that have exited.
+        let running_ids: Vec<String> = self.addon_processes.keys().cloned().collect();
+
+        for id in running_ids {
+            let exited = {
+                if let Some(child) = self.addon_processes.get_mut(&id) {
+                    matches!(child.try_wait(), Ok(Some(_)))
+                } else {
+                    false
+                }
+            };
+
+            if exited {
+                self.addon_processes.remove(&id);
+                self.log(format!("Add-on process exited: {id}"));
+            }
+        }
+
+        // 2. Stop processes whose manifest is now disabled or gone.
+        let running_ids: Vec<String> = self.addon_processes.keys().cloned().collect();
+
+        for id in running_ids {
+            let should_run = self
+                .addons
+                .iter()
+                .any(|addon| addon.id == id && addon.enabled);
+
+            if !should_run {
+                if let Some(mut child) = self.addon_processes.remove(&id) {
+                    let _ = child.kill();
+                    self.log(format!("Stopped disabled add-on: {id}"));
+                }
+            }
+        }
+
+        // 3. Launch enabled add-ons that are not already running.
+        let enabled_addons: Vec<AddonRow> = self
+            .addons
+            .iter()
+            .filter(|addon| addon.enabled)
+            .cloned()
+            .collect();
+
+        for addon in enabled_addons {
+            if self.addon_processes.contains_key(&addon.id) {
+                continue;
+            }
+
+            match launch_addon(&addon) {
+                Ok(child) => {
+                    self.addon_processes.insert(addon.id.clone(), child);
+                    self.log(format!("Started add-on: {}", addon.name));
+                }
+                Err(err) => {
+                    self.log(format!("Could not start add-on {}: {err}", addon.name));
+                }
+            }
         }
     }
 
@@ -1474,7 +1539,7 @@ fn api_worker(rx: mpsc::Receiver<ApiJob>, tx: mpsc::Sender<UiMsg>) {
             ApiJob::Peers => json!({ "cmd": "list_peers" }),
             ApiJob::Trusted => json!({ "cmd": "list_trusted_devices" }),
             ApiJob::Connections => json!({ "cmd": "list_connections" }),
-            ApiJob::Addons => json!({ "cmd": "list_addons" }),
+            ApiJob::Addons => json!({ "cmd": "reload_addons" }),
             ApiJob::ReloadAddons => json!({ "cmd": "reload_addons" }),
             ApiJob::Shutdown => json!({ "cmd": "shutdown" }),
             ApiJob::PollEvents { service } => {
