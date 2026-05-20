@@ -59,6 +59,22 @@ pub fn run_api_client(args: &[String]) -> Result<()> {
             req
         }
 
+        "disconnect" | "disconnect_device" => {
+            let mut req = json!({
+                "cmd": "disconnect_device"
+            });
+
+            if let Some(peer) = optional_arg(args, "--peer") {
+                req["peer_id"] = json!(peer);
+            }
+
+            if let Some(mac) = optional_arg(args, "--mac") {
+                req["mac"] = json!(mac);
+            }
+
+            req
+        }
+
         "send" | "send_message" => {
             let peer = required_arg(args, "--peer")?;
             let service = required_arg(args, "--service")?;
@@ -222,6 +238,7 @@ fn print_help() {
     println!("  locallink-core --api trusted");
     println!("  locallink-core --api trust-mac --mac aa:bb:cc:dd:ee:ff --name \"My Laptop\"");
     println!("  locallink-core --api connect --mac aa:bb:cc:dd:ee:ff");
+    println!("  locallink-core --api disconnect --mac aa:bb:cc:dd:ee:ff");
     println!("  locallink-core --api connections");
     println!("  locallink-core --api addons");
 }

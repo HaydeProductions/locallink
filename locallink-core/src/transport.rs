@@ -19,6 +19,7 @@ use sha2::Sha256;
 use std::collections::{HashMap, VecDeque};
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
+use tokio::io::AsyncWriteExt;
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
@@ -306,6 +307,21 @@ async fn send_encrypted_payload(
                 "timed out writing to peer; stale connection removed"
             ))
         }
+    }
+}
+
+pub async fn disconnect_peer(connections: ConnectionRegistry, peer_id: &str) -> Result<bool> {
+    let conn = {
+        let mut guard = connections.lock().await;
+        guard.remove(peer_id)
+    };
+
+    if let Some(conn) = conn {
+        let mut writer = conn.writer.lock().await;
+        let _ = writer.shutdown().await;
+        Ok(true)
+    } else {
+        Ok(false)
     }
 }
 

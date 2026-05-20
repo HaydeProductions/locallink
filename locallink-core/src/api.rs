@@ -5,8 +5,8 @@ use crate::config::{
 };
 use crate::discovery::Peer;
 use crate::transport::{
-    close_channel, connect_to_peer, open_channel, send_channel_data, send_service_message,
-    ApiEvent, ConnectionRegistry, EventQueue, RunOptions,
+    close_channel, connect_to_peer, disconnect_peer, open_channel, send_channel_data,
+    send_service_message, ApiEvent, ConnectionRegistry, EventQueue, RunOptions,
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -274,6 +274,7 @@ async fn handle_request(
                     "add_trusted_device",
                     "remove_trusted_device",
                     "connect_device",
+                    "disconnect_device",
                     "list_addons",
                     "reload_addons",
                     "send_message",
@@ -337,7 +338,35 @@ async fn handle_request(
                 .mac
                 .ok_or_else(|| anyhow::anyhow!("remove_trusted_device requires mac"))?;
 
-            let response = remove_trusted_mac(&mac)?;
+            let wanted = normalize_mac(&mac);
+
+            let matching_peer_ids: Vec<String> = {
+                let peers_guard = peers.lock().await;
+                peers_guard
+                    .values()
+                    .filter(|peer| peer.macs.iter().any(|m| normalize_mac(m) == wanted))
+                    .map(|peer| peer.device_id.clone())
+                    .collect()
+            };
+
+            let mut disconnected = Vec::new();
+
+            for peer_id in matching_peer_ids {
+                if disconnect_peer(connections.clone(), &peer_id)
+                    .await
+                    .unwrap_or(false)
+                {
+                    disconnected.push(peer_id);
+                }
+            }
+
+            let trusted_devices = remove_trusted_mac(&mac)?;
+
+            let response = serde_json::json!({
+                "trusted_devices": trusted_devices,
+                "disconnected": disconnected
+            });
+
             Ok(serde_json::to_string(&ok(response))?)
         }
 
@@ -476,6 +505,52 @@ async fn handle_request(
             }
 
             response.sort_by(|a, b| a.device_name.cmp(&b.device_name));
+            Ok(serde_json::to_string(&ok(response))?)
+        }
+
+        "disconnect_device" => {
+            let mut target_peer_ids = Vec::new();
+
+            if let Some(peer_id) = req.peer_id.clone() {
+                target_peer_ids.push(peer_id);
+            }
+
+            if let Some(mac) = req.mac.clone() {
+                let wanted = normalize_mac(&mac);
+
+                let peers_guard = peers.lock().await;
+
+                for peer in peers_guard.values() {
+                    if peer.macs.iter().any(|m| normalize_mac(m) == wanted) {
+                        target_peer_ids.push(peer.device_id.clone());
+                    }
+                }
+            }
+
+            target_peer_ids.sort();
+            target_peer_ids.dedup();
+
+            if target_peer_ids.is_empty() {
+                anyhow::bail!(
+                    "disconnect_device requires peer_id or a MAC matching a discovered peer"
+                );
+            }
+
+            let mut disconnected = Vec::new();
+
+            for peer_id in target_peer_ids {
+                if disconnect_peer(connections.clone(), &peer_id)
+                    .await
+                    .unwrap_or(false)
+                {
+                    disconnected.push(peer_id);
+                }
+            }
+
+            let response = serde_json::json!({
+                "disconnected": disconnected
+            });
+
             Ok(serde_json::to_string(&ok(response))?)
         }
 

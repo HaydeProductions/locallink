@@ -58,6 +58,10 @@ enum ApiJob {
         mac: Option<String>,
         peer_id: Option<String>,
     },
+    Disconnect {
+        mac: Option<String>,
+        peer_id: Option<String>,
+    },
     ReloadAddons,
     Shutdown,
 }
@@ -311,11 +315,19 @@ impl LocalLinkUi {
                 self.log("Trusted device removed.");
                 self.send_job(ApiJob::Trusted);
                 self.send_job(ApiJob::Peers);
+                self.send_job(ApiJob::Connections);
             }
             "connect" => {
                 self.log("Connection requested.");
                 self.send_job(ApiJob::Connections);
                 self.send_job(ApiJob::Peers);
+                self.send_job(ApiJob::Trusted);
+            }
+            "disconnect" => {
+                self.log("Disconnected device.");
+                self.send_job(ApiJob::Connections);
+                self.send_job(ApiJob::Peers);
+                self.send_job(ApiJob::Trusted);
             }
             "reload_addons" => {
                 self.log("Add-ons reloaded.");
@@ -505,6 +517,18 @@ impl eframe::App for LocalLinkUi {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.apply_style(ctx);
         self.pump_messages();
+
+        // Auto-refresh visible state periodically so users do not need to keep pressing Refresh.
+        if self.loading_count == 0 {
+            let should_refresh = self
+                .last_refresh
+                .map(|t| t.elapsed() > Duration::from_secs(3))
+                .unwrap_or(true);
+
+            if should_refresh {
+                self.refresh_visible();
+            }
+        }
 
         egui::TopBottomPanel::top("header").show(ctx, |ui| {
             egui::Frame::none()
@@ -786,17 +810,22 @@ impl LocalLinkUi {
                 ui.add_space(8.0);
 
                 ui.horizontal(|ui| {
-                    if connected.is_none() {
-                        if let Some(peer) = nearby_peer.clone() {
-                            if ui.add(primary_button("Connect")).clicked() {
-                                self.send_job(ApiJob::Connect {
-                                    mac: trusted.macs.first().cloned(),
-                                    peer_id: Some(peer.device_id.clone()),
-                                });
-                            }
-                        } else {
-                            ui.add_enabled(false, primary_button("Connect"));
+                    if let Some(conn) = connected.clone() {
+                        if ui.button("Disconnect").clicked() {
+                            self.send_job(ApiJob::Disconnect {
+                                mac: trusted.macs.first().cloned(),
+                                peer_id: Some(conn.device_id.clone()),
+                            });
                         }
+                    } else if let Some(peer) = nearby_peer.clone() {
+                        if ui.add(primary_button("Connect")).clicked() {
+                            self.send_job(ApiJob::Connect {
+                                mac: trusted.macs.first().cloned(),
+                                peer_id: Some(peer.device_id.clone()),
+                            });
+                        }
+                    } else {
+                        ui.add_enabled(false, primary_button("Connect"));
                     }
 
                     if ui.button("Remove").clicked() {
@@ -1133,6 +1162,21 @@ fn api_worker(rx: mpsc::Receiver<ApiJob>, tx: mpsc::Sender<UiMsg>) {
 
                 req
             }
+            ApiJob::Disconnect { mac, peer_id } => {
+                let mut req = json!({
+                    "cmd": "disconnect_device"
+                });
+
+                if let Some(mac) = mac {
+                    req["mac"] = json!(mac);
+                }
+
+                if let Some(peer_id) = peer_id {
+                    req["peer_id"] = json!(peer_id);
+                }
+
+                req
+            }
         };
 
         let result = api_request(request);
@@ -1164,6 +1208,7 @@ fn job_name(job: &ApiJob) -> &'static str {
         ApiJob::AddTrusted { .. } => "add_trusted",
         ApiJob::RemoveTrusted { .. } => "remove_trusted",
         ApiJob::Connect { .. } => "connect",
+        ApiJob::Disconnect { .. } => "disconnect",
         ApiJob::ReloadAddons => "reload_addons",
         ApiJob::Shutdown => "shutdown",
     }
