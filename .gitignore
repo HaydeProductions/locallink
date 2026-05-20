@@ -1,1 +1,28 @@
-/target
+# Rust build output
+target/
+
+# Local packaged builds
+dist/
+
+# Local/runtime files
+.env
+*.log
+*.lock
+runtime/
+state/
+logs/
+secrets/
+
+# LocalLink config/secrets if accidentally copied here
+config.json
+trusted-devices.json
+trusted-peers.json
+
+# Editor/OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Windows debug symbols
+*.pdb

@@ -139,7 +139,8 @@ fn local_macs() -> Vec<String> {
             let text = String::from_utf8_lossy(&output.stdout);
 
             for line in text.lines() {
-                // CSV-ish output: "AA-BB-CC-DD-EE-FF","\Device\..."
+                // getmac CSV output usually starts with:
+                // "AA-BB-CC-DD-EE-FF","\Device\Tcpip_..."
                 let first = line
                     .split(',')
                     .next()
@@ -156,12 +157,25 @@ fn local_macs() -> Vec<String> {
         }
     }
 
-    #[cfg(not(target_os = "windows"))]
-    {
-        // Simple fallback for now. Linux/macOS can be improved later.
+    macs
+}
+
+fn normalize_mac_local(mac: &str) -> String {
+    let hex: String = mac
+        .chars()
+        .filter(|c| c.is_ascii_hexdigit())
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+
+    if hex.len() != 12 {
+        return String::new();
     }
 
-    macs
+    hex.as_bytes()
+        .chunks(2)
+        .map(|chunk| std::str::from_utf8(chunk).unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join(":")
 }
 
 fn normalize_mac_local(mac: &str) -> String {
