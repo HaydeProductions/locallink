@@ -200,6 +200,32 @@ impl LocalLinkUi {
 
         std::thread::spawn(move || api_worker(job_rx, msg_tx));
 
+        // Background live-refresh loop.
+        // This keeps the UI feeling live without blocking the UI thread.
+        // A true push/subscription system can replace this later.
+        let refresh_tx = job_tx.clone();
+        std::thread::spawn(move || {
+            let mut tick: u64 = 0;
+
+            loop {
+                std::thread::sleep(Duration::from_millis(1500));
+                tick += 1;
+
+                let _ = refresh_tx.send(ApiJob::Status);
+                let _ = refresh_tx.send(ApiJob::Peers);
+                let _ = refresh_tx.send(ApiJob::Trusted);
+                let _ = refresh_tx.send(ApiJob::Connections);
+
+                if tick % 3 == 0 {
+                    let _ = refresh_tx.send(ApiJob::Addons);
+                }
+
+                if tick % 2 == 0 {
+                    let _ = refresh_tx.send(ApiJob::PollEvents { service: None });
+                }
+            }
+        });
+
         let mut app = Self {
             screen: Screen::Discover,
 
@@ -530,19 +556,12 @@ impl LocalLinkUi {
 
 impl eframe::App for LocalLinkUi {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Keep the widget live even when the user is not moving the mouse.
+        // Without this, egui may not repaint immediately after background API updates.
+        ctx.request_repaint_after(Duration::from_millis(150));
+
         self.apply_style(ctx);
         self.pump_messages();
-
-        if self.loading_count == 0 {
-            let should_refresh = self
-                .last_refresh
-                .map(|t| t.elapsed() > Duration::from_secs(3))
-                .unwrap_or(true);
-
-            if should_refresh {
-                self.refresh_visible();
-            }
-        }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             paint_background(ui);
@@ -555,12 +574,24 @@ impl eframe::App for LocalLinkUi {
                     self.tabs(ui);
                     ui.add_space(18.0);
 
-                    match self.screen {
-                        Screen::Discover => self.screen_discover(ui),
-                        Screen::Devices => self.screen_devices(ui),
-                        Screen::Addons => self.screen_addons(ui),
-                        Screen::Activity => self.screen_activity(ui),
-                    }
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            // Subtle right-side breathing room so the scrollbar
+                            // does not visually touch the cards. This does not
+                            // introduce a separate gutter or change the outer layout.
+                            let content_width = (ui.available_width() - 10.0).max(260.0);
+                            ui.set_width(content_width);
+
+                            match self.screen {
+                                Screen::Discover => self.screen_discover(ui),
+                                Screen::Devices => self.screen_devices(ui),
+                                Screen::Addons => self.screen_addons(ui),
+                                Screen::Activity => self.screen_activity(ui),
+                            }
+
+                            ui.add_space(28.0);
+                        });
                 });
         });
 
