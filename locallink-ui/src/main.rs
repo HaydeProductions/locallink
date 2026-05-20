@@ -1105,20 +1105,31 @@ impl LocalLinkUi {
                 let is_running = running_ids.contains(&addon.id);
                 let mut enabled = addon.enabled;
 
+                let title = ellipsize(&format!("{} {}", addon.name, addon.version), 30);
+                let description = ellipsize(&addon.description, 82);
+                let executable = ellipsize(&addon.executable, 42);
+                let services = ellipsize(&addon.services.join(", "), 54);
+                let folder = ellipsize(&addon.addon_dir, 54);
+                let manifest = ellipsize(&addon.manifest_path, 54);
+
                 device_card(ui, |ui| {
-                    // Header: name/description left, status right.
+                    // Header: fixed-size text zone + state chip.
                     ui.horizontal_top(|ui| {
                         ui.vertical(|ui| {
-                            ui.heading(
-                                egui::RichText::new(format!("{} {}", addon.name, addon.version))
+                            ui.set_min_width(0.0);
+                            ui.set_max_width((ui.available_width() - 86.0).max(180.0));
+
+                            ui.label(
+                                egui::RichText::new(title)
                                     .color(color_text())
-                                    .size(22.0),
+                                    .size(21.0)
+                                    .strong(),
                             );
 
                             ui.add_space(4.0);
 
                             ui.label(
-                                egui::RichText::new(&addon.description)
+                                egui::RichText::new(description)
                                     .color(color_muted())
                                     .size(14.0),
                             );
@@ -1137,7 +1148,7 @@ impl LocalLinkUi {
 
                     ui.add_space(16.0);
 
-                    // Activation tray: a dedicated control area.
+                    // Activation tray: stable layout, no long text expansion.
                     let tray_fill = if enabled {
                         color_accent_dark().linear_multiply(0.52)
                     } else {
@@ -1177,9 +1188,9 @@ impl LocalLinkUi {
 
                                     ui.label(
                                         egui::RichText::new(if enabled {
-                                            "This add-on is allowed to run and use LocalLink."
+                                            "Allowed to run and use LocalLink."
                                         } else {
-                                            "Turn this on when you want this feature available."
+                                            "Turn on to make this feature available."
                                         })
                                         .color(color_muted())
                                         .size(12.5),
@@ -1199,11 +1210,11 @@ impl LocalLinkUi {
 
                     if self.show_advanced {
                         ui.separator();
-                        mono_line(ui, "ID", &addon.id);
-                        mono_line(ui, "Executable", &addon.executable);
-                        mono_line(ui, "Services", &addon.services.join(", "));
-                        mono_line(ui, "Folder", &addon.addon_dir);
-                        mono_line(ui, "Manifest", &addon.manifest_path);
+                        mono_line(ui, "ID", &ellipsize(&addon.id, 44));
+                        mono_line(ui, "Executable", &executable);
+                        mono_line(ui, "Services", &services);
+                        mono_line(ui, "Folder", &folder);
+                        mono_line(ui, "Manifest", &manifest);
                     }
                 });
 
@@ -1817,6 +1828,23 @@ fn readonly_line(ui: &mut egui::Ui, label: &str, value: &str) {
                 .interactive(false),
         );
     });
+}
+
+fn ellipsize(input: &str, max_chars: usize) -> String {
+    let trimmed = input.trim();
+
+    if trimmed.chars().count() <= max_chars {
+        return trimmed.to_string();
+    }
+
+    if max_chars <= 3 {
+        return "...".to_string();
+    }
+
+    let keep = max_chars - 3;
+    let mut out: String = trimmed.chars().take(keep).collect();
+    out.push_str("...");
+    out
 }
 
 fn human_event_title(event: &EventRow) -> String {
