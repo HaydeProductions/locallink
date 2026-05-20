@@ -648,10 +648,19 @@ impl LocalLinkUi {
                 });
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(icon_button("⚙")).clicked() {
+                    if ui
+                        .add(icon_button("⚙"))
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .clicked()
+                    {
                         self.show_settings = true;
                     }
-                    if !self.core_online() && ui.add(primary_button("Start")).clicked() {
+                    if !self.core_online()
+                        && ui
+                            .add(primary_button("Start"))
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                    {
                         self.start_core();
                     }
                 });
@@ -712,6 +721,10 @@ impl LocalLinkUi {
 
             let id = ui.id().with(format!("tab-{}", label));
             let response = ui.interact(tab_rect, id, egui::Sense::click());
+
+            if response.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
 
             if response.clicked() {
                 self.screen = *target;
@@ -839,14 +852,22 @@ impl LocalLinkUi {
 
                     ui.horizontal_wrapped(|ui| {
                         if !peer.trusted {
-                            if ui.add(primary_button("Add Device")).clicked() {
+                            if ui
+                                .add(primary_button("Add Device"))
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                .clicked()
+                            {
                                 self.send_job(ApiJob::AddTrusted {
                                     name: peer.device_name.clone(),
                                     mac: primary_mac.clone(),
                                 });
                             }
                         } else if !peer.connected {
-                            if ui.add(primary_button("Connect")).clicked() {
+                            if ui
+                                .add(primary_button("Connect"))
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                .clicked()
+                            {
                                 self.send_job(ApiJob::Connect {
                                     mac: Some(primary_mac.clone()),
                                     peer_id: Some(peer.device_id.clone()),
@@ -906,7 +927,11 @@ impl LocalLinkUi {
 
             ui.add_space(8.0);
 
-            if ui.add(primary_button("Add Trusted Device")).clicked() {
+            if ui
+                .add(primary_button("Add Trusted Device"))
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
                 let name = if self.add_name.trim().is_empty() {
                     self.add_mac.trim().to_string()
                 } else {
@@ -985,14 +1010,22 @@ impl LocalLinkUi {
 
                     ui.horizontal_wrapped(|ui| {
                         if let Some(conn) = connected.clone() {
-                            if ui.add(secondary_button("Disconnect")).clicked() {
+                            if ui
+                                .add(secondary_button("Disconnect"))
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                .clicked()
+                            {
                                 self.send_job(ApiJob::Disconnect {
                                     mac: trusted.macs.first().cloned(),
                                     peer_id: Some(conn.device_id.clone()),
                                 });
                             }
                         } else if let Some(peer) = nearby_peer.clone() {
-                            if ui.add(primary_button("Connect")).clicked() {
+                            if ui
+                                .add(primary_button("Connect"))
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                .clicked()
+                            {
                                 self.send_job(ApiJob::Connect {
                                     mac: trusted.macs.first().cloned(),
                                     peer_id: Some(peer.device_id.clone()),
@@ -1002,7 +1035,11 @@ impl LocalLinkUi {
                             ui.add_enabled(false, primary_button("Connect"));
                         }
 
-                        if ui.add(danger_button("Remove")).clicked() {
+                        if ui
+                            .add(danger_button("Remove"))
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                        {
                             if let Some(mac) = trusted.macs.first() {
                                 self.send_job(ApiJob::RemoveTrusted { mac: mac.clone() });
                             }
@@ -1060,28 +1097,35 @@ impl LocalLinkUi {
             return;
         }
 
+        let running_ids: Vec<String> = self.addon_processes.keys().cloned().collect();
         let mut toggle_action: Option<(String, bool)> = None;
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             for addon in &mut self.addons {
+                let is_running = running_ids.contains(&addon.id);
+                let mut enabled = addon.enabled;
+
                 device_card(ui, |ui| {
-                    ui.horizontal_wrapped(|ui| {
+                    // Header: name/description left, status right.
+                    ui.horizontal_top(|ui| {
                         ui.vertical(|ui| {
                             ui.heading(
                                 egui::RichText::new(format!("{} {}", addon.name, addon.version))
-                                    .color(color_text()),
+                                    .color(color_text())
+                                    .size(22.0),
                             );
-                            ui.label(egui::RichText::new(&addon.description).color(color_muted()));
+
+                            ui.add_space(4.0);
+
+                            ui.label(
+                                egui::RichText::new(&addon.description)
+                                    .color(color_muted())
+                                    .size(14.0),
+                            );
                         });
 
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let mut enabled = addon.enabled;
-
-                            if toggle_switch(ui, &mut enabled).changed() {
-                                toggle_action = Some((addon.id.clone(), enabled));
-                            }
-
-                            if self.addon_processes.contains_key(&addon.id) {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                            if is_running {
                                 state_chip(ui, "Running", color_success());
                             } else if addon.enabled {
                                 state_chip(ui, "Enabled", color_warning());
@@ -1090,6 +1134,68 @@ impl LocalLinkUi {
                             }
                         });
                     });
+
+                    ui.add_space(16.0);
+
+                    // Activation tray: a dedicated control area.
+                    let tray_fill = if enabled {
+                        color_accent_dark().linear_multiply(0.52)
+                    } else {
+                        color_panel().linear_multiply(0.82)
+                    };
+
+                    let tray_stroke = if enabled {
+                        egui::Stroke::new(1.0, color_accent().linear_multiply(0.72))
+                    } else {
+                        egui::Stroke::new(1.0, color_border().linear_multiply(0.45))
+                    };
+
+                    egui::Frame::none()
+                        .fill(tray_fill)
+                        .stroke(tray_stroke)
+                        .rounding(egui::Rounding::same(18))
+                        .inner_margin(egui::Margin::symmetric(16, 13))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(if enabled {
+                                            "Feature enabled"
+                                        } else {
+                                            "Feature disabled"
+                                        })
+                                        .color(if enabled {
+                                            color_success()
+                                        } else {
+                                            color_text()
+                                        })
+                                        .size(15.0)
+                                        .strong(),
+                                    );
+
+                                    ui.add_space(2.0);
+
+                                    ui.label(
+                                        egui::RichText::new(if enabled {
+                                            "This add-on is allowed to run and use LocalLink."
+                                        } else {
+                                            "Turn this on when you want this feature available."
+                                        })
+                                        .color(color_muted())
+                                        .size(12.5),
+                                    );
+                                });
+
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if toggle_switch(ui, &mut enabled).changed() {
+                                            toggle_action = Some((addon.id.clone(), enabled));
+                                        }
+                                    },
+                                );
+                            });
+                        });
 
                     if self.show_advanced {
                         ui.separator();
@@ -1124,7 +1230,11 @@ impl LocalLinkUi {
                         .hint_text("service"),
                 );
 
-                if ui.add(primary_button("Check")).clicked() {
+                if ui
+                    .add(primary_button("Check"))
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
                     let service = if self.event_filter.trim().is_empty() {
                         None
                     } else {
@@ -1134,7 +1244,11 @@ impl LocalLinkUi {
                     self.send_job(ApiJob::PollEvents { service });
                 }
 
-                if ui.add(secondary_button("Clear")).clicked() {
+                if ui
+                    .add(secondary_button("Clear"))
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
                     self.events.clear();
                 }
             });
@@ -1233,15 +1347,27 @@ impl LocalLinkUi {
                             "Offline"
                         });
 
-                        if ui.add(primary_button("Start")).clicked() {
+                        if ui
+                            .add(primary_button("Start"))
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                        {
                             self.start_core();
                         }
 
-                        if ui.add(secondary_button("Shutdown")).clicked() {
+                        if ui
+                            .add(secondary_button("Shutdown"))
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                        {
                             self.send_job(ApiJob::Shutdown);
                         }
 
-                        if ui.add(secondary_button("Refresh")).clicked() {
+                        if ui
+                            .add(secondary_button("Refresh"))
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                        {
                             self.refresh_all();
                         }
                     });
@@ -1313,7 +1439,11 @@ impl LocalLinkUi {
                             }
                         });
 
-                    if ui.add(secondary_button("Clear")).clicked() {
+                    if ui
+                        .add(secondary_button("Clear"))
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .clicked()
+                    {
                         self.log.clear();
                     }
                 });
@@ -1443,6 +1573,14 @@ fn nav_tab(ui: &mut egui::Ui, current: &mut Screen, tab: Screen, label: &str, wi
     let selected = *current == tab;
     let desired_size = egui::vec2(width, 34.0);
     let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
 
     if response.clicked() {
         *current = tab;
@@ -1603,6 +1741,14 @@ fn status_dot(ui: &mut egui::Ui, color: egui::Color32) {
 fn toggle_switch(ui: &mut egui::Ui, value: &mut bool) -> egui::Response {
     let desired_size = egui::vec2(58.0, 32.0);
     let (rect, mut response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
 
     if response.clicked() {
         *value = !*value;
