@@ -18,10 +18,12 @@ if (Test-Path $Dist) {
 
 New-Item -ItemType Directory -Force -Path $Dist | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Dist "addons\example-echo") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $Dist "addons\clipboard-sync") | Out-Null
 
 Copy-Item (Join-Path $Root "target\release\locallink-core.exe") (Join-Path $Dist "locallink-core.exe") -Force
 Copy-Item (Join-Path $Root "target\release\locallink-ui.exe") (Join-Path $Dist "LocalLink.exe") -Force
 Copy-Item (Join-Path $Root "target\release\locallink-addon-echo.exe") (Join-Path $Dist "addons\example-echo\locallink-addon-echo.exe") -Force
+Copy-Item (Join-Path $Root "target\release\locallink-addon-clipboard.exe") (Join-Path $Dist "addons\clipboard-sync\locallink-addon-clipboard.exe") -Force
 
 @"
 {
@@ -39,6 +41,20 @@ Copy-Item (Join-Path $Root "target\release\locallink-addon-echo.exe") (Join-Path
 "@ | Set-Content (Join-Path $Dist "addons\example-echo\manifest.json")
 
 @"
+{
+  "id": "clipboard-sync",
+  "name": "Clipboard Sync",
+  "version": "0.1.0",
+  "description": "Keeps text clipboards synchronized across connected LocalLink devices. Newest clipboard wins.",
+  "executable": "locallink-addon-clipboard.exe",
+  "services": [
+    "clipboard-sync"
+  ],
+  "enabled": false
+}
+"@ | Set-Content (Join-Path $Dist "addons\clipboard-sync\manifest.json")
+
+@"
 LocalLink development package
 
 Run UI:
@@ -47,14 +63,11 @@ Run UI:
 Run core directly:
   .\locallink-core.exe
 
-API helper:
-  .\locallink-core.exe --api status
-  .\locallink-core.exe --api paths
-  .\locallink-core.exe --api addons
-  .\locallink-core.exe --api shutdown
-
-Run example addon directly:
+Run example echo addon:
   .\addons\example-echo\locallink-addon-echo.exe
+
+Run clipboard sync addon:
+  .\addons\clipboard-sync\locallink-addon-clipboard.exe
 
 AppData:
   %APPDATA%\LocalLink
