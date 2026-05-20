@@ -177,21 +177,3 @@ fn normalize_mac_local(mac: &str) -> String {
         .collect::<Vec<_>>()
         .join(":")
 }
-
-fn normalize_mac_local(mac: &str) -> String {
-    let hex: String = mac
-        .chars()
-        .filter(|c| c.is_ascii_hexdigit())
-        .map(|c| c.to_ascii_lowercase())
-        .collect();
-
-    if hex.len() != 12 {
-        return String::new();
-    }
-
-    hex.as_bytes()
-        .chunks(2)
-        .map(|chunk| std::str::from_utf8(chunk).unwrap_or(""))
-        .collect::<Vec<_>>()
-        .join(":")
-}
