@@ -37,27 +37,8 @@ pub struct AddonRecord {
 }
 
 pub fn create_example_addon_manifest() -> Result<()> {
-    let root = addons_dir()?;
-    let example_dir = root.join("example-echo");
-    fs::create_dir_all(&example_dir)?;
-
-    let manifest_path = example_dir.join("manifest.json");
-
-    if manifest_path.exists() {
-        return Ok(());
-    }
-
-    let manifest = AddonManifest {
-        id: "example-echo".to_string(),
-        name: "Example Echo Addon".to_string(),
-        version: "0.1.0".to_string(),
-        description: "Example addon manifest for testing LocalLink service routing.".to_string(),
-        executable: "example-echo.exe".to_string(),
-        services: vec!["test.echo".to_string(), "test.channel".to_string()],
-        enabled: true,
-    };
-
-    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
+    // No-op.
+    // Example add-ons should not be recreated automatically once the user removes them.
     Ok(())
 }
 

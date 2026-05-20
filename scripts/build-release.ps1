@@ -17,28 +17,11 @@ if (Test-Path $Dist) {
 }
 
 New-Item -ItemType Directory -Force -Path $Dist | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $Dist "addons\example-echo") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Dist "addons\clipboard-sync") | Out-Null
 
 Copy-Item (Join-Path $Root "target\release\locallink-core.exe") (Join-Path $Dist "locallink-core.exe") -Force
 Copy-Item (Join-Path $Root "target\release\locallink-ui.exe") (Join-Path $Dist "LocalLink.exe") -Force
-Copy-Item (Join-Path $Root "target\release\locallink-addon-echo.exe") (Join-Path $Dist "addons\example-echo\locallink-addon-echo.exe") -Force
 Copy-Item (Join-Path $Root "target\release\locallink-addon-clipboard.exe") (Join-Path $Dist "addons\clipboard-sync\locallink-addon-clipboard.exe") -Force
-
-@"
-{
-  "id": "example-echo",
-  "name": "Example Echo Addon",
-  "version": "0.1.0",
-  "description": "Simple addon that listens on test.echo and replies on test.echo.reply.",
-  "executable": "locallink-addon-echo.exe",
-  "services": [
-    "test.echo",
-    "test.echo.reply"
-  ],
-  "enabled": true
-}
-"@ | Set-Content (Join-Path $Dist "addons\example-echo\manifest.json")
 
 @"
 {
@@ -62,9 +45,6 @@ Run UI:
 
 Run core directly:
   .\locallink-core.exe
-
-Run example echo addon:
-  .\addons\example-echo\locallink-addon-echo.exe
 
 Run clipboard sync addon:
   .\addons\clipboard-sync\locallink-addon-clipboard.exe
