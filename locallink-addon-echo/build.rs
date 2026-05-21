@@ -4,7 +4,10 @@ fn main() {
     }
 
     match std::env::var("CARGO_CFG_TARGET_ENV").as_deref() {
-        Ok("msvc") => println!("cargo:rustc-link-arg-bin=locallink-addon-echo=/SUBSYSTEM:WINDOWS"),
+        Ok("msvc") => {
+            println!("cargo:rustc-link-arg-bin=locallink-addon-echo=/SUBSYSTEM:WINDOWS");
+            println!("cargo:rustc-link-arg-bin=locallink-addon-echo=/ENTRY:mainCRTStartup");
+        }
         _ => println!("cargo:rustc-link-arg-bin=locallink-addon-echo=-mwindows"),
     }
 }
