@@ -82,17 +82,12 @@ async fn main() -> Result<()> {
     if cfg.psk_b64.is_none() {
         println!();
         println!("No PSK configured yet.");
-        println!("On one laptop, run:");
-        println!("  cargo run --release -- --gen-psk");
-        println!();
-        println!("Then copy the printed PSK to the other laptop and run:");
-        println!("  cargo run --release -- --set-psk \"PASTE_PSK_HERE\"");
-        println!();
-        println!("You can also run --set-psk on this laptop if needed.");
-        return Ok(());
+        println!("The local API will stay online so the UI can show setup/status.");
+        println!("Pairing and encrypted device connections require a PSK.");
+    } else {
+        println!("PSK:         configured");
     }
 
-    println!("PSK:         configured");
     println!("Connect:     manual only");
 
     if opts.bench {
