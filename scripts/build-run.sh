@@ -6,6 +6,12 @@ DIST="$ROOT/dist/LocalLink"
 
 cd "$ROOT"
 
+echo "Stopping any running LocalLink processes..."
+cmd.exe /c "taskkill /F /T /IM LocalLink.exe" >/dev/null 2>&1 || true
+cmd.exe /c "taskkill /F /T /IM locallink-core.exe" >/dev/null 2>&1 || true
+cmd.exe /c "taskkill /F /T /IM locallink-addon-clipboard.exe" >/dev/null 2>&1 || true
+sleep 1
+
 echo "Building LocalLink workspace release..."
 cargo build --release
 
