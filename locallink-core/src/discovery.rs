@@ -11,6 +11,8 @@ use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration, Instant};
 
+const PEER_TTL: Duration = Duration::from_secs(15);
+
 #[derive(Debug, Clone)]
 pub struct Peer {
     pub device_id: String,
@@ -77,10 +79,12 @@ pub async fn discovery_loop(
 
     println!("Discovery started on UDP [{MULTICAST_ADDR}]:{DISCOVERY_PORT}");
     println!("Discovery interfaces: {:?}", interface_indices);
+    println!("Discovery peer TTL: {}s", PEER_TTL.as_secs());
     println!("Connection mode: manual only");
     println!("Local MAC hints: {}", announce.macs.join(", "));
 
-    start_discovery_receiver(socket, cfg.clone(), peers);
+    start_discovery_receiver(socket, cfg.clone(), peers.clone());
+    start_peer_expiry(peers.clone());
 
     loop {
         for interface_id in &interface_indices {
@@ -150,6 +154,27 @@ fn start_discovery_receiver(
     });
 }
 
+fn start_peer_expiry(peers: Arc<Mutex<HashMap<String, Peer>>>) {
+    tokio::spawn(async move {
+        loop {
+            sleep(Duration::from_secs(5)).await;
+
+            let now = Instant::now();
+            let mut peers_guard = peers.lock().await;
+            let before = peers_guard.len();
+
+            peers_guard.retain(|_, peer| now.duration_since(peer.last_seen) <= PEER_TTL);
+
+            let expired = before.saturating_sub(peers_guard.len());
+            drop(peers_guard);
+
+            if expired > 0 {
+                println!("Expired {expired} stale discovered peer(s)");
+            }
+        }
+    });
+}
+
 fn multicast_interface_indices() -> Vec<u32> {
     if let Ok(value) = std::env::var("LOCALLINK_DISCOVERY_IFINDEX") {
         if let Ok(index) = value.trim().parse::<u32>() {
@@ -167,7 +192,7 @@ fn multicast_interface_indices() -> Vec<u32> {
             .args([
                 "-NoProfile",
                 "-Command",
-                "Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and ($_.Name -like '*Ethernet*' -or $_.InterfaceDescription -like '*Ethernet*') } | Select-Object -ExpandProperty ifIndex",
+                "Get-NetAdapter -Physical | Where-Object { $_.Status -eq 'Up' -and $_.ifIndex -gt 0 } | Select-Object -ExpandProperty ifIndex",
             ])
             .output()
         {
