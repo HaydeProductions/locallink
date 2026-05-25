@@ -13,7 +13,7 @@ use config::{
     load_or_create_config, save_config, validate_psk_b64,
 };
 use discovery::Peer;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 use std::path::Path;
@@ -21,7 +21,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration, Instant};
-use transport::{tcp_server, ApiEvent, ConnectedPeer, ConnectionRegistry, RunOptions};
+use transport::{tcp_server, ConnectedPeer, ConnectionRegistry, EventStore, RunOptions};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -108,7 +108,7 @@ async fn main() -> Result<()> {
     let peers = Arc::new(Mutex::new(HashMap::<String, Peer>::new()));
     let connecting = Arc::new(Mutex::new(HashSet::<String>::new()));
     let connections = Arc::new(Mutex::new(HashMap::<String, ConnectedPeer>::new()));
-    let events = Arc::new(Mutex::new(VecDeque::<ApiEvent>::new()));
+    let events = Arc::new(Mutex::new(EventStore::default()));
     let addons = Arc::new(Mutex::new(Vec::<AddonRecord>::from(loaded_addons)));
 
     let cfg_server = cfg.clone();

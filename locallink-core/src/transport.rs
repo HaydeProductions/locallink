@@ -1,4 +1,4 @@
-use crate::config::{psk_bytes, Config};
+use crate::config::{psk_bytes, register_device_id_for_macs, Config};
 use crate::protocol::{
     read_frame, write_frame, AuthChallenge, AuthResponse, ChannelClose, ChannelData, ChannelOpen,
     HelloPayload, ServiceData, APP_NAME, FRAME_AUTH_CHALLENGE, FRAME_AUTH_RESPONSE,
@@ -23,10 +23,14 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
-use tokio::time::{sleep, timeout, Duration, Instant};
+use tokio::time::{sleep, Duration, Instant};
 use uuid::Uuid;
 
 type HmacSha256 = Hmac<Sha256>;
+
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
+const HEARTBEAT_MAX_CONSECUTIVE_WRITE_FAILURES: u32 = 3;
+const MAX_EVENT_LOG: usize = 4096;
 
 #[derive(Debug, Clone)]
 pub struct RunOptions {
@@ -76,7 +80,75 @@ pub struct ApiEvent {
     pub received_ms: u128,
 }
 
-pub type EventQueue = Arc<Mutex<VecDeque<ApiEvent>>>;
+#[derive(Debug, Default)]
+pub struct EventStore {
+    next_seq: u64,
+    events: VecDeque<(u64, ApiEvent)>,
+    cursors: HashMap<String, u64>,
+}
+
+pub type EventQueue = Arc<Mutex<EventStore>>;
+
+impl EventStore {
+    fn push(&mut self, event: ApiEvent) {
+        self.next_seq = self.next_seq.saturating_add(1);
+        self.events.push_back((self.next_seq, event));
+
+        while self.events.len() > MAX_EVENT_LOG {
+            self.events.pop_front();
+        }
+
+        let oldest_seq = self
+            .events
+            .front()
+            .map(|(seq, _)| *seq)
+            .unwrap_or(self.next_seq);
+        self.cursors.retain(|_, cursor| *cursor >= oldest_seq);
+    }
+
+    fn take_for_consumer(
+        &mut self,
+        consumer_id: &str,
+        service_filter: Option<&str>,
+        max_events: usize,
+    ) -> Vec<ApiEvent> {
+        let start_after = *self.cursors.entry(consumer_id.to_string()).or_insert(0);
+        let mut taken = Vec::new();
+        let mut highest_seen = start_after;
+
+        for (seq, event) in &self.events {
+            if *seq <= start_after {
+                continue;
+            }
+
+            highest_seen = highest_seen.max(*seq);
+
+            let service_matches = match service_filter {
+                Some(service) => event.service == service,
+                None => true,
+            };
+
+            if service_matches && taken.len() < max_events {
+                taken.push(event.clone());
+            }
+        }
+
+        self.cursors.insert(consumer_id.to_string(), highest_seen);
+        taken
+    }
+}
+
+pub async fn take_events(
+    events: EventQueue,
+    consumer_id: &str,
+    service_filter: Option<&str>,
+    max_events: usize,
+) -> Vec<ApiEvent> {
+    events
+        .lock()
+        .await
+        .take_for_consumer(consumer_id, service_filter, max_events)
+}
 
 impl SessionCrypto {
     fn cipher(&self) -> ChaCha20Poly1305 {
@@ -163,6 +235,7 @@ pub async fn tcp_server(
                 opts_clone,
                 stream,
                 "inbound",
+                Vec::new(),
                 connections_clone,
                 events_clone,
             )
@@ -179,6 +252,7 @@ pub async fn connect_to_peer(
     opts: RunOptions,
     peer_addr: SocketAddrV6,
     peer_id: String,
+    peer_macs: Vec<String>,
     connections: ConnectionRegistry,
     events: EventQueue,
 ) {
@@ -186,8 +260,16 @@ pub async fn connect_to_peer(
 
     match TcpStream::connect(peer_addr).await {
         Ok(stream) => {
-            if let Err(err) =
-                handle_connection(cfg, opts, stream, "outbound", connections, events).await
+            if let Err(err) = handle_connection(
+                cfg,
+                opts,
+                stream,
+                "outbound",
+                peer_macs,
+                connections,
+                events,
+            )
+            .await
             {
                 eprintln!("Outbound connection to {peer_id} ended: {err}");
             }
@@ -281,30 +363,20 @@ async fn send_encrypted_payload(
             .ok_or_else(|| anyhow::anyhow!("not connected to peer {peer_id}"))?
     };
 
-    let send_result = timeout(
-        Duration::from_secs(3),
-        write_secure_frame(
-            &conn.writer,
-            &conn.crypto,
-            &conn.send_seq,
-            inner_kind,
-            payload,
-        ),
+    match write_secure_frame(
+        &conn.writer,
+        &conn.crypto,
+        &conn.send_seq,
+        inner_kind,
+        payload,
     )
-    .await;
-
-    match send_result {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(e)) => {
+    .await
+    {
+        Ok(()) => Ok(()),
+        Err(e) => {
             connections.lock().await.remove(peer_id);
             Err(anyhow::anyhow!(
-                "failed to write to peer; connection removed: {e}"
-            ))
-        }
-        Err(_) => {
-            connections.lock().await.remove(peer_id);
-            Err(anyhow::anyhow!(
-                "timed out writing to peer; stale connection removed"
+                "failed to write complete frame to peer; connection removed: {e}"
             ))
         }
     }
@@ -435,10 +507,15 @@ pub async fn handle_connection(
     opts: RunOptions,
     stream: TcpStream,
     direction: &'static str,
+    post_auth_macs: Vec<String>,
     connections: ConnectionRegistry,
     events: EventQueue,
 ) -> Result<()> {
     let psk = psk_bytes(&cfg)?;
+
+    stream
+        .set_nodelay(true)
+        .context("setting TCP_NODELAY for low-latency direct-link traffic")?;
 
     let peer_addr = stream.peer_addr()?;
     let peer_addr_string = peer_addr.to_string();
@@ -480,8 +557,10 @@ pub async fn handle_connection(
     let mut auth_ok = false;
     let mut crypto: Option<SessionCrypto> = None;
     let mut registered = false;
+    let mut trust_bound = false;
     let mut heartbeat_started = false;
     let mut benchmark_started = false;
+    let mut highest_recv_seq = 0u64;
 
     let mut bench_active = false;
     let mut bench_bytes: u64 = 0;
@@ -503,6 +582,15 @@ pub async fn handle_connection(
             let Some(ref crypto_state) = crypto else {
                 bail!("received encrypted frame before secure session was established");
             };
+
+            if frame.seq == 0 || frame.seq <= highest_recv_seq {
+                bail!(
+                    "replayed or non-monotonic encrypted frame from {peer_name}: seq={} highest={}",
+                    frame.seq,
+                    highest_recv_seq
+                );
+            }
+            highest_recv_seq = frame.seq;
 
             let (inner_kind, inner_payload) = crypto_state.decrypt(frame.seq, &frame.payload)?;
 
@@ -581,6 +669,18 @@ pub async fn handle_connection(
             FRAME_AUTH_RESPONSE => {
                 let response: AuthResponse = serde_json::from_slice(&frame.payload)?;
 
+                if let Some(hello_device_id) = peer_device_id.as_deref() {
+                    if hello_device_id != response.device_id {
+                        bail!(
+                            "peer identity mismatch: HELLO device_id={} auth_response device_id={}",
+                            hello_device_id,
+                            response.device_id
+                        );
+                    }
+                } else {
+                    peer_device_id = Some(response.device_id.clone());
+                }
+
                 let received = STANDARD
                     .decode(response.hmac_b64)
                     .context("invalid auth response hmac")?;
@@ -593,11 +693,16 @@ pub async fn handle_connection(
 
                 auth_ok = true;
 
-                if peer_device_id.is_none() {
-                    peer_device_id = Some(response.device_id.clone());
-                }
-
                 println!("PSK authentication OK for {}", response.device_id);
+
+                if !trust_bound && !post_auth_macs.is_empty() {
+                    register_device_id_for_macs(&post_auth_macs, &response.device_id)?;
+                    trust_bound = true;
+                    println!(
+                        "Bound authenticated device ID {} to trusted MAC hints",
+                        response.device_id
+                    );
+                }
 
                 if crypto.is_none() {
                     if let (Some(peer_id), Some(peer_nonce_value)) =
@@ -825,12 +930,7 @@ async fn handle_post_auth_frame(
 }
 
 async fn push_event(events: EventQueue, event: ApiEvent) {
-    let mut q = events.lock().await;
-    q.push_back(event);
-
-    while q.len() > 4096 {
-        q.pop_front();
-    }
+    events.lock().await.push(event);
 }
 
 fn now_ms() -> u128 {
@@ -849,15 +949,34 @@ fn start_heartbeat(
     connections: ConnectionRegistry,
 ) {
     tokio::spawn(async move {
-        loop {
-            sleep(Duration::from_secs(5)).await;
+        let mut consecutive_write_failures = 0;
 
-            if let Err(err) = write_secure_frame(&writer, &crypto, &send_seq, FRAME_PING, &[]).await
-            {
-                eprintln!("Encrypted heartbeat stopped for {peer_name} | {peer_id}: {err}");
-                connections.lock().await.remove(&peer_id);
-                eprintln!("Removed stale connection for {peer_name} | {peer_id}");
-                break;
+        loop {
+            sleep(HEARTBEAT_INTERVAL).await;
+
+            match write_secure_frame(&writer, &crypto, &send_seq, FRAME_PING, &[]).await {
+                Ok(()) => {
+                    if consecutive_write_failures > 0 {
+                        eprintln!(
+                            "Encrypted heartbeat recovered for {peer_name} | {peer_id} after {consecutive_write_failures} failed write(s)"
+                        );
+                    }
+                    consecutive_write_failures = 0;
+                }
+                Err(err) => {
+                    consecutive_write_failures += 1;
+                    eprintln!(
+                        "Encrypted heartbeat write failed for {peer_name} | {peer_id} ({consecutive_write_failures}/{HEARTBEAT_MAX_CONSECUTIVE_WRITE_FAILURES}): {err}"
+                    );
+
+                    if consecutive_write_failures >= HEARTBEAT_MAX_CONSECUTIVE_WRITE_FAILURES {
+                        connections.lock().await.remove(&peer_id);
+                        eprintln!(
+                            "Removed stale connection for {peer_name} | {peer_id} after repeated heartbeat write failures"
+                        );
+                        break;
+                    }
+                }
             }
         }
     });
