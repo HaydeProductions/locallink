@@ -119,6 +119,7 @@ pub fn acquire_single_instance_lock() -> Result<File> {
     let path = lock_path()?;
     let file = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(&path)?;
