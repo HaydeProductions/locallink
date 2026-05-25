@@ -12,6 +12,11 @@ fn main() {
         source
     );
 
+    generated = generated.replace(
+        "use std::process::{Child, Command, Stdio};\n",
+        "use std::process::{Child, Command, Stdio};\n#[cfg(target_os = \"windows\")]\nuse std::os::windows::process::CommandExt;\n",
+    );
+
     generated = must_replace(
         generated,
         "    fn start_core(&mut self) {\n        match start_sibling_core() {\n            Ok(()) => {\n                self.log(\"Starting LocalLink Core...\");\n                std::thread::sleep(Duration::from_millis(250));\n                self.refresh_all();\n            }\n            Err(e) => self.log(format!(\"Could not start core: {e}\")),\n        }\n    }\n\n",
@@ -42,6 +47,12 @@ fn main() {
         generated,
         "                ui.add_space(12.0);\n\n                glass_panel(ui, |ui| {\n                    ui.horizontal_wrapped(|ui| {\n                        ui.heading(\"Advanced\");",
         "                ui.add_space(12.0);\n\n                self.network_requirements_panel(ui);\n\n                ui.add_space(12.0);\n\n                glass_panel(ui, |ui| {\n                    ui.horizontal_wrapped(|ui| {\n                        ui.heading(\"Advanced\");",
+    );
+
+    generated = must_replace(
+        generated,
+        "    Command::new(core)\n        .current_dir(dir)\n        .stdin(Stdio::null())\n        .stdout(Stdio::inherit())\n        .stderr(Stdio::inherit())\n        .spawn()?;",
+        "    let mut command = Command::new(core);\n    command\n        .current_dir(dir)\n        .stdin(Stdio::null())\n        .stdout(Stdio::null())\n        .stderr(Stdio::null());\n\n    #[cfg(target_os = \"windows\")]\n    command.creation_flags(0x08000000); // CREATE_NO_WINDOW\n\n    command.spawn()?;",
     );
 
     generated.push_str(NETWORK_REQUIREMENTS_CODE);
