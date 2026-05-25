@@ -109,7 +109,7 @@ async fn main() -> Result<()> {
     let connecting = Arc::new(Mutex::new(HashSet::<String>::new()));
     let connections = Arc::new(Mutex::new(HashMap::<String, ConnectedPeer>::new()));
     let events = Arc::new(Mutex::new(EventStore::default()));
-    let addons = Arc::new(Mutex::new(Vec::<AddonRecord>::from(loaded_addons)));
+    let addons = Arc::new(Mutex::new(loaded_addons));
 
     let cfg_server = cfg.clone();
     let opts_server = opts.clone();
