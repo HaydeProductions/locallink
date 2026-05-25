@@ -7,7 +7,10 @@ fn main() {
     let source = fs::read_to_string("src/main.rs")
         .expect("read src/main.rs")
         .replace("\r\n", "\n");
-    let mut generated = source;
+    let mut generated = format!(
+        "#![cfg_attr(target_os = \"windows\", windows_subsystem = \"windows\")]\n\n{}",
+        source
+    );
 
     generated = must_replace(
         generated,
