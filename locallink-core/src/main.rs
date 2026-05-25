@@ -168,23 +168,30 @@ fn start_addon_process_manager(
             let has_connections = !connections.lock().await.is_empty();
 
             if !has_connections {
+                if had_connections || !children.is_empty() {
+                    stop_all_addon_children(&mut children);
+                    kill_external_addon_processes();
+                    eprintln!("Stopped add-ons because there are no active connections");
+                }
+
                 suppressed_until_next_connection.clear();
-            } else if !had_connections {
+                had_connections = false;
+                sleep(Duration::from_millis(250)).await;
+                continue;
+            }
+
+            if !had_connections {
                 suppressed_until_next_connection.clear();
             }
-            had_connections = has_connections;
+            had_connections = true;
 
             let addon_snapshot = addons.lock().await.clone();
 
-            let wanted: HashMap<String, AddonRecord> = if has_connections {
-                addon_snapshot
-                    .into_iter()
-                    .filter(|addon| addon.enabled)
-                    .map(|addon| (addon.id.clone(), addon))
-                    .collect()
-            } else {
-                HashMap::new()
-            };
+            let wanted: HashMap<String, AddonRecord> = addon_snapshot
+                .into_iter()
+                .filter(|addon| addon.enabled)
+                .map(|addon| (addon.id.clone(), addon))
+                .collect();
 
             suppressed_until_next_connection.retain(|id| wanted.contains_key(id));
 
@@ -234,9 +241,50 @@ fn start_addon_process_manager(
                 }
             }
 
-            sleep(Duration::from_secs(1)).await;
+            sleep(Duration::from_millis(250)).await;
         }
     });
+}
+
+fn stop_all_addon_children(children: &mut HashMap<String, Child>) {
+    for (id, mut child) in children.drain() {
+        let _ = child.kill();
+        let _ = child.wait();
+        eprintln!("Stopped add-on: {id}");
+    }
+}
+
+fn kill_external_addon_processes() {
+    #[cfg(target_os = "windows")]
+    {
+        for image in ["locallink-addon-clipboard.exe", "locallink-addon-echo.exe"] {
+            let mut command = Command::new("taskkill.exe");
+            command
+                .args(["/F", "/T", "/IM", image])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+            let _ = command.spawn().and_then(|mut child| child.wait());
+        }
+
+        let mut command = Command::new("powershell.exe");
+        command
+            .args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                "Get-Process | Where-Object { $_.ProcessName -like 'locallink-addon-*' } | Stop-Process -Force",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+        let _ = command.spawn().and_then(|mut child| child.wait());
+    }
 }
 
 fn launch_core_owned_addon(addon: &AddonRecord) -> Result<Child> {
