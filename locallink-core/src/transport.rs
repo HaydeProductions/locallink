@@ -23,10 +23,13 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
-use tokio::time::{sleep, timeout, Duration, Instant};
+use tokio::time::{sleep, Duration, Instant};
 use uuid::Uuid;
 
 type HmacSha256 = Hmac<Sha256>;
+
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
+const HEARTBEAT_MAX_CONSECUTIVE_WRITE_FAILURES: u32 = 3;
 
 #[derive(Debug, Clone)]
 pub struct RunOptions {
@@ -281,30 +284,20 @@ async fn send_encrypted_payload(
             .ok_or_else(|| anyhow::anyhow!("not connected to peer {peer_id}"))?
     };
 
-    let send_result = timeout(
-        Duration::from_secs(3),
-        write_secure_frame(
-            &conn.writer,
-            &conn.crypto,
-            &conn.send_seq,
-            inner_kind,
-            payload,
-        ),
+    match write_secure_frame(
+        &conn.writer,
+        &conn.crypto,
+        &conn.send_seq,
+        inner_kind,
+        payload,
     )
-    .await;
-
-    match send_result {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(e)) => {
+    .await
+    {
+        Ok(()) => Ok(()),
+        Err(e) => {
             connections.lock().await.remove(peer_id);
             Err(anyhow::anyhow!(
-                "failed to write to peer; connection removed: {e}"
-            ))
-        }
-        Err(_) => {
-            connections.lock().await.remove(peer_id);
-            Err(anyhow::anyhow!(
-                "timed out writing to peer; stale connection removed"
+                "failed to write complete frame to peer; connection removed: {e}"
             ))
         }
     }
@@ -439,6 +432,10 @@ pub async fn handle_connection(
     events: EventQueue,
 ) -> Result<()> {
     let psk = psk_bytes(&cfg)?;
+
+    stream
+        .set_nodelay(true)
+        .context("setting TCP_NODELAY for low-latency direct-link traffic")?;
 
     let peer_addr = stream.peer_addr()?;
     let peer_addr_string = peer_addr.to_string();
@@ -849,15 +846,34 @@ fn start_heartbeat(
     connections: ConnectionRegistry,
 ) {
     tokio::spawn(async move {
-        loop {
-            sleep(Duration::from_secs(5)).await;
+        let mut consecutive_write_failures = 0;
 
-            if let Err(err) = write_secure_frame(&writer, &crypto, &send_seq, FRAME_PING, &[]).await
-            {
-                eprintln!("Encrypted heartbeat stopped for {peer_name} | {peer_id}: {err}");
-                connections.lock().await.remove(&peer_id);
-                eprintln!("Removed stale connection for {peer_name} | {peer_id}");
-                break;
+        loop {
+            sleep(HEARTBEAT_INTERVAL).await;
+
+            match write_secure_frame(&writer, &crypto, &send_seq, FRAME_PING, &[]).await {
+                Ok(()) => {
+                    if consecutive_write_failures > 0 {
+                        eprintln!(
+                            "Encrypted heartbeat recovered for {peer_name} | {peer_id} after {consecutive_write_failures} failed write(s)"
+                        );
+                    }
+                    consecutive_write_failures = 0;
+                }
+                Err(err) => {
+                    consecutive_write_failures += 1;
+                    eprintln!(
+                        "Encrypted heartbeat write failed for {peer_name} | {peer_id} ({consecutive_write_failures}/{HEARTBEAT_MAX_CONSECUTIVE_WRITE_FAILURES}): {err}"
+                    );
+
+                    if consecutive_write_failures >= HEARTBEAT_MAX_CONSECUTIVE_WRITE_FAILURES {
+                        connections.lock().await.remove(&peer_id);
+                        eprintln!(
+                            "Removed stale connection for {peer_name} | {peer_id} after repeated heartbeat write failures"
+                        );
+                        break;
+                    }
+                }
             }
         }
     });
