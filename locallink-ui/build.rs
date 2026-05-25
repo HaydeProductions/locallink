@@ -69,7 +69,7 @@ unsafe fn windows_tray_thread() {
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
-        DispatchMessageW, GetCursorPos, GetMessageW, LoadIconW, PostMessageW, PostQuitMessage,
+        DispatchMessageW, GetCursorPos, GetMessageW, LoadIconW, PostQuitMessage,
         RegisterClassW, SetForegroundWindow, TrackPopupMenu, TranslateMessage, CS_HREDRAW,
         CS_VREDRAW, CW_USEDEFAULT, HMENU, IDI_APPLICATION, MF_SEPARATOR, MF_STRING, MSG,
         TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, WM_APP, WM_COMMAND, WM_DESTROY,
@@ -147,20 +147,20 @@ unsafe fn windows_tray_thread() {
         CW_USEDEFAULT,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
-        0,
-        0,
+        null_mut(),
+        null_mut(),
         instance,
         null_mut::<c_void>(),
     );
 
-    if hwnd == 0 {
+    if hwnd.is_null() {
         return;
     }
 
     add_tray_icon(hwnd);
 
     let mut msg: MSG = zeroed();
-    while GetMessageW(&mut msg, 0, 0, 0) > 0 {
+    while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
@@ -173,11 +173,11 @@ unsafe fn windows_tray_thread() {
             nid.uID = TRAY_UID;
             nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
             nid.uCallbackMessage = WM_TRAYICON;
-            nid.hIcon = LoadIconW(0, IDI_APPLICATION);
+            nid.hIcon = LoadIconW(null_mut(), IDI_APPLICATION);
             write_wide_fixed(&mut nid.szTip, "LocalLink");
 
             Shell_NotifyIconW(NIM_ADD, &mut nid);
-            nid.uVersion = NOTIFYICON_VERSION_4;
+            nid.Anonymous.uVersion = NOTIFYICON_VERSION_4;
             Shell_NotifyIconW(NIM_SETVERSION, &mut nid);
         }
     }
@@ -195,7 +195,7 @@ unsafe fn windows_tray_thread() {
     fn show_tray_menu(hwnd: HWND) {
         unsafe {
             let menu: HMENU = CreatePopupMenu();
-            if menu == 0 {
+            if menu.is_null() {
                 return;
             }
 
@@ -230,7 +230,7 @@ unsafe fn windows_tray_thread() {
 
             let title = wide_null("LocalLink");
             let hwnd = FindWindowW(null(), title.as_ptr());
-            if hwnd != 0 {
+            if !hwnd.is_null() {
                 if IsIconic(hwnd) != 0 {
                     ShowWindow(hwnd, SW_RESTORE);
                 } else {
