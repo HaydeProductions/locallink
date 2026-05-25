@@ -151,6 +151,14 @@ fn start_discovery_receiver(
 }
 
 fn multicast_interface_indices() -> Vec<u32> {
+    if let Ok(value) = std::env::var("LOCALLINK_DISCOVERY_IFINDEX") {
+        if let Ok(index) = value.trim().parse::<u32>() {
+            if index != 0 {
+                return vec![index];
+            }
+        }
+    }
+
     let mut indices = Vec::new();
 
     #[cfg(target_os = "windows")]
@@ -159,7 +167,7 @@ fn multicast_interface_indices() -> Vec<u32> {
             .args([
                 "-NoProfile",
                 "-Command",
-                "Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -ExpandProperty ifIndex",
+                "Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and ($_.Name -like '*Ethernet*' -or $_.InterfaceDescription -like '*Ethernet*') } | Select-Object -ExpandProperty ifIndex",
             ])
             .output()
         {
