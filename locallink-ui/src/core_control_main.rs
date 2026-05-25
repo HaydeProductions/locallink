@@ -5,7 +5,7 @@ extern crate std as real_std;
 
 #[allow(dead_code)]
 mod std {
-    pub use crate::real_std::{env, thread};
+    pub use crate::real_std::{env, str, thread};
 
     pub mod collections {
         pub use crate::real_std::collections::*;
