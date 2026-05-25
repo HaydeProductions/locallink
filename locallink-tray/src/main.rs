@@ -25,8 +25,8 @@ unsafe fn windows_tray_main() -> Result<()> {
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Shell::{
-        Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_SETVERSION,
-        NOTIFYICONDATAW, NOTIFYICON_VERSION_4,
+        Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE,
+        NOTIFYICONDATAW,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
@@ -98,8 +98,6 @@ unsafe fn windows_tray_main() -> Result<()> {
             write_wide_fixed(&mut nid.szTip, "LocalLink");
 
             Shell_NotifyIconW(NIM_ADD, &mut nid);
-            nid.Anonymous.uVersion = NOTIFYICON_VERSION_4;
-            Shell_NotifyIconW(NIM_SETVERSION, &mut nid);
         }
     }
 
