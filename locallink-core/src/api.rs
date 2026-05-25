@@ -1,7 +1,7 @@
 use crate::addons::{load_addon_manifests, AddonRecord};
 use crate::config::{
     add_trusted_device, app_paths, load_trusted_devices, mac_is_trusted, normalize_mac,
-    register_device_id_for_macs, remove_trusted_mac, trusted_name_for_macs, Config,
+    remove_trusted_mac, trusted_name_for_macs, Config,
 };
 use crate::discovery::Peer;
 use crate::transport::{
@@ -339,15 +339,26 @@ async fn handle_request(
                 .ok_or_else(|| anyhow::anyhow!("remove_trusted_device requires mac"))?;
 
             let wanted = normalize_mac(&mac);
+            let existing_trusted_devices = load_trusted_devices()?;
 
-            let matching_peer_ids: Vec<String> = {
+            let mut matching_peer_ids: Vec<String> = existing_trusted_devices
+                .iter()
+                .filter(|device| device.macs.iter().any(|m| normalize_mac(m) == wanted))
+                .filter_map(|device| device.device_id.clone())
+                .collect();
+
+            {
                 let peers_guard = peers.lock().await;
-                peers_guard
-                    .values()
-                    .filter(|peer| peer.macs.iter().any(|m| normalize_mac(m) == wanted))
-                    .map(|peer| peer.device_id.clone())
-                    .collect()
-            };
+                matching_peer_ids.extend(
+                    peers_guard
+                        .values()
+                        .filter(|peer| peer.macs.iter().any(|m| normalize_mac(m) == wanted))
+                        .map(|peer| peer.device_id.clone()),
+                );
+            }
+
+            matching_peer_ids.sort();
+            matching_peer_ids.dedup();
 
             let mut disconnected = Vec::new();
 
@@ -403,8 +414,6 @@ async fn handle_request(
             if !mac_is_trusted(&peer.macs)? {
                 anyhow::bail!("Device is visible, but none of its MAC addresses are trusted yet");
             }
-
-            register_device_id_for_macs(&peer.macs, &peer.device_id)?;
 
             if connections.lock().await.contains_key(&peer.device_id) {
                 let response = serde_json::json!({
