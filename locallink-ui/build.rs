@@ -4,7 +4,9 @@ use std::path::Path;
 fn main() {
     println!("cargo:rerun-if-changed=src/main.rs");
 
-    let source = fs::read_to_string("src/main.rs").expect("read src/main.rs");
+    let source = fs::read_to_string("src/main.rs")
+        .expect("read src/main.rs")
+        .replace("\r\n", "\n");
     let mut generated = source;
 
     generated = must_replace(
