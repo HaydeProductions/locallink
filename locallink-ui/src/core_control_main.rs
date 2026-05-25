@@ -11,19 +11,19 @@ mod eframe {
 
     pub use crate::real_eframe::{App, CreationContext, Frame, NativeOptions, Result};
 
-    pub type AppCreator<'app> = Box<
+    pub type AppCreator = Box<
         dyn FnOnce(
             &CreationContext<'_>,
         ) -> crate::real_std::result::Result<
             Box<dyn App>,
             Box<dyn Error + Send + Sync>,
-        > + 'app,
+        > + 'static,
     >;
 
     pub fn run_native(
         app_name: &str,
         mut native_options: NativeOptions,
-        app_creator: AppCreator<'_>,
+        app_creator: AppCreator,
     ) -> Result {
         native_options.viewport = native_options.viewport.with_icon(local_link_window_icon());
         crate::real_eframe::run_native(app_name, native_options, app_creator)
