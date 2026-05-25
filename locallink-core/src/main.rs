@@ -1,3 +1,7 @@
+#![allow(clippy::too_many_arguments)]
+#![allow(unused_assignments)]
+#![allow(unused_imports)]
+
 mod addons;
 mod api;
 mod api_client;
