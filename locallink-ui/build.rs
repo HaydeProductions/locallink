@@ -20,7 +20,7 @@ fn main() {
     generated = must_replace(
         generated,
         "    fn start_core(&mut self) {\n        match start_sibling_core() {\n            Ok(()) => {\n                self.log(\"Starting LocalLink Core...\");\n                std::thread::sleep(Duration::from_millis(250));\n                self.refresh_all();\n            }\n            Err(e) => self.log(format!(\"Could not start core: {e}\")),\n        }\n    }\n\n",
-        "    fn start_core(&mut self) {\n        match start_sibling_core() {\n            Ok(()) => {\n                self.log(\"Starting LocalLink Core...\");\n                std::thread::sleep(Duration::from_millis(250));\n                self.refresh_all();\n            }\n            Err(e) => self.log(format!(\"Could not start core: {e}\")),\n        }\n    }\n\n    fn stop_core(&mut self) {\n        self.send_job(ApiJob::Shutdown);\n\n        self.status = None;\n        self.peers.clear();\n        self.connections.clear();\n        self.addons.clear();\n\n        self.log(\"Stopping LocalLink Core...\");\n    }\n\n",
+        "    fn start_core(&mut self) {\n        force_stop_core_processes();\n        std::thread::sleep(Duration::from_millis(200));\n\n        match start_sibling_core() {\n            Ok(()) => {\n                self.log(\"Starting LocalLink Core...\");\n                std::thread::sleep(Duration::from_millis(250));\n                self.refresh_all();\n            }\n            Err(e) => self.log(format!(\"Could not start core: {e}\")),\n        }\n    }\n\n    fn stop_core(&mut self) {\n        self.send_job(ApiJob::Shutdown);\n        force_stop_core_processes();\n\n        self.status = None;\n        self.peers.clear();\n        self.connections.clear();\n        self.addons.clear();\n\n        self.log(\"Stopped LocalLink Core.\");\n    }\n\n",
     );
 
     generated = must_replace(
@@ -68,6 +68,7 @@ fn main() {
     );
 
     generated.push_str(NETWORK_REQUIREMENTS_CODE);
+    generated.push_str(PROCESS_CONTROL_CODE);
 
     fs::write(Path::new("src/core_control_main.rs"), generated)
         .expect("write generated UI entry point");
@@ -153,5 +154,45 @@ fn network_repair_script() -> Result<std::path::PathBuf> {
     }
 
     anyhow::bail!("windows-network-repair.ps1 was not found")
+}
+"#;
+
+const PROCESS_CONTROL_CODE: &str = r#"
+
+fn force_stop_core_processes() {
+    #[cfg(target_os = "windows")]
+    {
+        for image in [
+            "locallink-addon-clipboard.exe",
+            "locallink-addon-echo.exe",
+            "locallink-core.exe",
+        ] {
+            let mut command = Command::new("taskkill.exe");
+            command
+                .args(["/F", "/T", "/IM", image])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+            let _ = command.spawn().and_then(|mut child| child.wait());
+        }
+
+        let mut command = Command::new("powershell.exe");
+        command
+            .args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                "Get-Process | Where-Object { $_.ProcessName -like 'locallink-addon-*' } | Stop-Process -Force",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+        let _ = command.spawn().and_then(|mut child| child.wait());
+    }
 }
 "#;
