@@ -15,6 +15,7 @@ mkdir -p "$DIST/addons/clipboard-sync"
 
 cp "$ROOT/target/release/locallink-core.exe" "$DIST/locallink-core.exe"
 cp "$ROOT/target/release/locallink-ui.exe" "$DIST/LocalLink.exe"
+cp "$ROOT/target/release/locallink-tray.exe" "$DIST/LocalLinkTray.exe"
 cp "$ROOT/target/release/locallink-addon-clipboard.exe" "$DIST/addons/clipboard-sync/locallink-addon-clipboard.exe"
 
 cat > "$DIST/addons/clipboard-sync/manifest.json" <<'JSON'
@@ -34,7 +35,10 @@ JSON
 cat > "$DIST/README.txt" <<'TXT'
 LocalLink development package
 
-Run UI:
+Run tray controller:
+  ./LocalLinkTray.exe
+
+Run UI directly:
   ./LocalLink.exe
 
 Run core directly:

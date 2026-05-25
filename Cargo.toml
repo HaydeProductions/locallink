@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "locallink-core",
     "locallink-ui",
+    "locallink-tray",
     "locallink-addon-echo",
     "locallink-addon-clipboard"
 ]
