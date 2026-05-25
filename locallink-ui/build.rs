@@ -20,7 +20,7 @@ fn main() {
     generated = must_replace(
         generated,
         "    fn start_core(&mut self) {\n        match start_sibling_core() {\n            Ok(()) => {\n                self.log(\"Starting LocalLink Core...\");\n                std::thread::sleep(Duration::from_millis(250));\n                self.refresh_all();\n            }\n            Err(e) => self.log(format!(\"Could not start core: {e}\")),\n        }\n    }\n\n",
-        "    fn start_core(&mut self) {\n        match start_sibling_core() {\n            Ok(()) => {\n                self.log(\"Starting LocalLink Core...\");\n                std::thread::sleep(Duration::from_millis(250));\n                self.refresh_all();\n            }\n            Err(e) => self.log(format!(\"Could not start core: {e}\")),\n        }\n    }\n\n    fn stop_core(&mut self) {\n        for (_, mut child) in self.addon_processes.drain() {\n            let _ = child.kill();\n            let _ = child.wait();\n        }\n\n        self.send_job(ApiJob::Shutdown);\n\n        self.status = None;\n        self.peers.clear();\n        self.connections.clear();\n        self.addons.clear();\n\n        self.log(\"Stopping LocalLink Core...\");\n    }\n\n",
+        "    fn start_core(&mut self) {\n        match start_sibling_core() {\n            Ok(()) => {\n                self.log(\"Starting LocalLink Core...\");\n                std::thread::sleep(Duration::from_millis(250));\n                self.refresh_all();\n            }\n            Err(e) => self.log(format!(\"Could not start core: {e}\")),\n        }\n    }\n\n    fn stop_core(&mut self) {\n        self.send_job(ApiJob::Shutdown);\n\n        self.status = None;\n        self.peers.clear();\n        self.connections.clear();\n        self.addons.clear();\n\n        self.log(\"Stopping LocalLink Core...\");\n    }\n\n",
     );
 
     generated = must_replace(
@@ -53,6 +53,18 @@ fn main() {
         generated,
         "    Command::new(core)\n        .current_dir(dir)\n        .stdin(Stdio::null())\n        .stdout(Stdio::inherit())\n        .stderr(Stdio::inherit())\n        .spawn()?;",
         "    let mut command = Command::new(core);\n    command\n        .current_dir(dir)\n        .stdin(Stdio::null())\n        .stdout(Stdio::null())\n        .stderr(Stdio::null());\n\n    #[cfg(target_os = \"windows\")]\n    command.creation_flags(0x08000000); // CREATE_NO_WINDOW\n\n    command.spawn()?;",
+    );
+
+    generated = must_replace(
+        generated,
+        "        self.reconcile_addon_processes();\n",
+        "        // The UI only displays add-on state. Add-on processes are owned by the core/connection layer, not the UI.\n",
+    );
+
+    generated = must_replace(
+        generated,
+        "        if enabled {\n            match launch_addon(&addon_snapshot) {\n                Ok(child) => {\n                    self.addon_processes\n                        .insert(addon_snapshot.id.clone(), child);\n                    self.log(format!(\"Enabled {}\", addon_snapshot.name));\n                }\n                Err(e) => self.log(format!(\n                    \"{} was enabled but could not be launched: {e}\",\n                    addon_snapshot.name\n                )),\n            }\n        } else if let Some(mut child) = self.addon_processes.remove(&addon_snapshot.id) {\n            let _ = child.kill();\n            self.log(format!(\"Disabled {}\", addon_snapshot.name));\n        } else {\n            self.log(format!(\"Disabled {}\", addon_snapshot.name));\n        }\n\n        self.send_job(ApiJob::ReloadAddons);",
+        "        if enabled {\n            self.log(format!(\"Enabled {}\", addon_snapshot.name));\n        } else {\n            self.log(format!(\"Disabled {}\", addon_snapshot.name));\n        }\n\n        self.send_job(ApiJob::ReloadAddons);",
     );
 
     generated.push_str(NETWORK_REQUIREMENTS_CODE);
