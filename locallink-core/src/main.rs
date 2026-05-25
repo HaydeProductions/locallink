@@ -170,7 +170,6 @@ fn start_addon_process_manager(
             if !has_connections {
                 if had_connections || !children.is_empty() {
                     stop_all_addon_children(&mut children);
-                    kill_external_addon_processes();
                     eprintln!("Stopped add-ons because there are no active connections");
                 }
 
@@ -251,39 +250,6 @@ fn stop_all_addon_children(children: &mut HashMap<String, Child>) {
         let _ = child.kill();
         let _ = child.wait();
         eprintln!("Stopped add-on: {id}");
-    }
-}
-
-fn kill_external_addon_processes() {
-    #[cfg(target_os = "windows")]
-    {
-        for image in ["locallink-addon-clipboard.exe", "locallink-addon-echo.exe"] {
-            let mut command = Command::new("taskkill.exe");
-            command
-                .args(["/F", "/T", "/IM", image])
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .creation_flags(0x08000000); // CREATE_NO_WINDOW
-
-            let _ = command.spawn().and_then(|mut child| child.wait());
-        }
-
-        let mut command = Command::new("powershell.exe");
-        command
-            .args([
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                "Get-Process | Where-Object { $_.ProcessName -like 'locallink-addon-*' } | Stop-Process -Force",
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .creation_flags(0x08000000); // CREATE_NO_WINDOW
-
-        let _ = command.spawn().and_then(|mut child| child.wait());
     }
 }
 
