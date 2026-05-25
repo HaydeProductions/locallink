@@ -1,3 +1,5 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 use anyhow::{bail, Context, Result};
 use serde_json::json;
 use std::fs;
