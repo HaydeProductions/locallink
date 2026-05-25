@@ -12,12 +12,16 @@ fi
 echo "Installing repo-local Git shortcuts..."
 
 git config --local alias.launch '!f() { root=$(git rev-parse --show-toplevel) && bash "$root/scripts/build-run.sh"; }; f'
-git config --local alias.build-local '!f() { root=$(git rev-parse --show-toplevel) && bash "$root/scripts/build.sh"; }; f'
-git config --local alias.run-local '!f() { root=$(git rev-parse --show-toplevel) && bash "$root/scripts/run.sh"; }; f'
-git config --local alias.kill-local '!f() { root=$(git rev-parse --show-toplevel) && bash "$root/scripts/kill-core.sh"; }; f'
+git config --local alias.build '!f() { root=$(git rev-parse --show-toplevel) && bash "$root/scripts/build.sh"; }; f'
+git config --local alias.run '!f() { root=$(git rev-parse --show-toplevel) && bash "$root/scripts/run.sh"; }; f'
+git config --local alias.kill '!f() { root=$(git rev-parse --show-toplevel) && bash "$root/scripts/kill-core.sh"; }; f'
+
+git config --local --unset alias.build-local >/dev/null 2>&1 || true
+git config --local --unset alias.run-local >/dev/null 2>&1 || true
+git config --local --unset alias.kill-local >/dev/null 2>&1 || true
 
 echo "Done. Available from any subfolder in this repo:"
-echo "  git launch       # kill -> build -> run"
-echo "  git build-local  # build/package only"
-echo "  git run-local    # run built UI only"
-echo "  git kill-local   # stop LocalLink processes"
+echo "  git launch  # kill -> build -> run"
+echo "  git build   # build/package only"
+echo "  git run     # run built UI only"
+echo "  git kill    # stop LocalLink processes"
