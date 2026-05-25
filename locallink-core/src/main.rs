@@ -14,11 +14,11 @@ use config::{
 };
 use discovery::Peer;
 use std::collections::{HashMap, HashSet, VecDeque};
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration, Instant};
 use transport::{tcp_server, ApiEvent, ConnectedPeer, ConnectionRegistry, RunOptions};

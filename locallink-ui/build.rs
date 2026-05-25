@@ -20,10 +20,7 @@ fn main() {
         "use std::process::{Child, Command, Stdio};\n#[cfg(target_os = \"windows\")]\nuse std::os::windows::process::CommandExt;\n",
     );
 
-    generated = generated.replace(
-        "use std::sync::mpsc;\n",
-        "use std::sync::{mpsc, Arc};\n",
-    );
+    generated = generated.replace("use std::sync::mpsc;\n", "use std::sync::{mpsc, Arc};\n");
 
     generated = must_replace(
         generated,
@@ -43,7 +40,10 @@ fn main() {
         "                    if self.core_online() {\n                        if ui\n                            .add(danger_button(\"Stop Core\"))\n                            .on_hover_cursor(egui::CursorIcon::PointingHand)\n                            .clicked()\n                        {\n                            self.stop_core();\n                        }\n                    } else if ui\n                        .add(primary_button(\"Start\"))\n                        .on_hover_cursor(egui::CursorIcon::PointingHand)\n                        .clicked()\n                    {\n                        self.start_core();\n                    }\n",
     );
 
-    generated = generated.replace("secondary_button(\"Shutdown\")", "danger_button(\"Stop Core\")");
+    generated = generated.replace(
+        "secondary_button(\"Shutdown\")",
+        "danger_button(\"Stop Core\")",
+    );
 
     generated = must_replace(
         generated,
@@ -112,7 +112,9 @@ fn must_replace(input: String, from: &str, to: &str) -> String {
     let output = input.replace(from, to);
 
     if output == input {
-        panic!("expected UI source pattern was not found while generating core-control entry point");
+        panic!(
+            "expected UI source pattern was not found while generating core-control entry point"
+        );
     }
 
     output

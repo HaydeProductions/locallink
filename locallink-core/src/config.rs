@@ -4,7 +4,8 @@ use fs2::FileExt;
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,12 +102,12 @@ pub fn init_app_dirs() -> Result<()> {
 
     let trusted_peers = trusted_peers_path()?;
     if !trusted_peers.exists() {
-        fs::write(&trusted_peers, "[]\n")?;
+        atomic_write(&trusted_peers, b"[]\n")?;
     }
 
     let trusted_devices = trusted_devices_path()?;
     if !trusted_devices.exists() {
-        fs::write(&trusted_devices, "[]\n")?;
+        atomic_write(&trusted_devices, b"[]\n")?;
     }
 
     Ok(())
@@ -125,7 +126,6 @@ pub fn acquire_single_instance_lock() -> Result<File> {
     match file.try_lock_exclusive() {
         Ok(()) => {
             file.set_len(0)?;
-            use std::io::Write;
             writeln!(&file, "pid={}", std::process::id())?;
             Ok(file)
         }
@@ -163,7 +163,8 @@ pub fn load_or_create_config() -> Result<Config> {
 
 pub fn save_config(cfg: &Config) -> Result<()> {
     init_app_dirs()?;
-    fs::write(config_path()?, serde_json::to_string_pretty(cfg)?)?;
+    let text = serde_json::to_string_pretty(cfg)?;
+    atomic_write(&config_path()?, text.as_bytes())?;
     Ok(())
 }
 
@@ -206,10 +207,8 @@ pub fn load_trusted_devices() -> Result<Vec<TrustedDevice>> {
 
 pub fn save_trusted_devices(devices: &[TrustedDevice]) -> Result<()> {
     init_app_dirs()?;
-    fs::write(
-        trusted_devices_path()?,
-        serde_json::to_string_pretty(devices)?,
-    )?;
+    let text = serde_json::to_string_pretty(devices)?;
+    atomic_write(&trusted_devices_path()?, text.as_bytes())?;
     Ok(())
 }
 
@@ -322,4 +321,19 @@ pub fn psk_bytes(cfg: &Config) -> Result<Vec<u8>> {
     let decoded = STANDARD.decode(psk)?;
     anyhow::ensure!(decoded.len() == 32, "PSK must decode to exactly 32 bytes");
     Ok(decoded)
+}
+
+fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let tmp_path = path.with_extension("tmp");
+    {
+        let mut file = File::create(&tmp_path)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+    }
+    fs::rename(&tmp_path, path)?;
+    Ok(())
 }
