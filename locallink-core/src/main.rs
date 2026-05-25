@@ -14,10 +14,14 @@ use config::{
 };
 use discovery::Peer;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::Path;
+use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use tokio::sync::Mutex;
-use tokio::time::Instant;
-use transport::{tcp_server, ApiEvent, ConnectedPeer, RunOptions};
+use tokio::time::{sleep, Duration, Instant};
+use transport::{tcp_server, ApiEvent, ConnectedPeer, ConnectionRegistry, RunOptions};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -120,6 +124,8 @@ async fn main() -> Result<()> {
         }
     });
 
+    start_addon_process_manager(addons.clone(), connections.clone());
+
     let cfg_api = cfg.clone();
     let peers_api = peers.clone();
     let connections_api = connections.clone();
@@ -147,4 +153,89 @@ async fn main() -> Result<()> {
     });
 
     discovery::discovery_loop(cfg, opts, peers, connecting, connections, events).await
+}
+
+fn start_addon_process_manager(
+    addons: Arc<Mutex<Vec<AddonRecord>>>,
+    connections: ConnectionRegistry,
+) {
+    tokio::spawn(async move {
+        let mut children = HashMap::<String, Child>::new();
+
+        loop {
+            let has_connections = !connections.lock().await.is_empty();
+            let addon_snapshot = addons.lock().await.clone();
+
+            let wanted: HashMap<String, AddonRecord> = if has_connections {
+                addon_snapshot
+                    .into_iter()
+                    .filter(|addon| addon.enabled)
+                    .map(|addon| (addon.id.clone(), addon))
+                    .collect()
+            } else {
+                HashMap::new()
+            };
+
+            let running_ids: Vec<String> = children.keys().cloned().collect();
+
+            for id in running_ids {
+                let exited = children
+                    .get_mut(&id)
+                    .and_then(|child| child.try_wait().ok())
+                    .is_some();
+
+                if exited {
+                    children.remove(&id);
+                    eprintln!("Add-on process exited: {id}");
+                    continue;
+                }
+
+                if !wanted.contains_key(&id) {
+                    if let Some(mut child) = children.remove(&id) {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        eprintln!("Stopped add-on: {id}");
+                    }
+                }
+            }
+
+            for (id, addon) in wanted {
+                if children.contains_key(&id) {
+                    continue;
+                }
+
+                match launch_core_owned_addon(&addon) {
+                    Ok(child) => {
+                        eprintln!("Started add-on: {}", addon.name);
+                        children.insert(id, child);
+                    }
+                    Err(err) => {
+                        eprintln!("Could not start add-on {}: {err}", addon.name);
+                    }
+                }
+            }
+
+            sleep(Duration::from_secs(1)).await;
+        }
+    });
+}
+
+fn launch_core_owned_addon(addon: &AddonRecord) -> Result<Child> {
+    let exe_path = Path::new(&addon.addon_dir).join(&addon.executable);
+
+    if !exe_path.exists() {
+        anyhow::bail!("add-on executable not found: {}", exe_path.display());
+    }
+
+    let mut command = Command::new(&exe_path);
+    command
+        .current_dir(Path::new(&addon.addon_dir))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+    Ok(command.spawn()?)
 }
