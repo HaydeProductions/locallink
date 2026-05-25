@@ -8,6 +8,11 @@ build = "build.rs"
 name = "locallink-ui"
 path = "src/core_control_main.rs"
 
+[lints.clippy]
+manual_is_multiple_of = "allow"
+manual_clamp = "allow"
+collapsible_if = "allow"
+
 [dependencies]
 anyhow = "1"
 eframe = "0.31"
