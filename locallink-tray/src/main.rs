@@ -49,22 +49,18 @@ unsafe fn windows_tray_main() -> Result<()> {
     extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         unsafe {
             match msg {
-                WM_TRAYICON => {
-                    if wparam as u32 == TRAY_UID {
-                        match lparam as u32 {
-                            WM_LBUTTONUP => {
-                                let _ = launch_or_focus_ui();
-                                return 0;
-                            }
-                            WM_RBUTTONUP => {
-                                show_tray_menu(hwnd);
-                                return 0;
-                            }
-                            _ => {}
-                        }
+                WM_TRAYICON if wparam as u32 == TRAY_UID => match lparam as u32 {
+                    WM_LBUTTONUP => {
+                        let _ = launch_or_focus_ui();
+                        return 0;
                     }
-                }
-                WM_COMMAND => match (wparam & 0xffff) as usize {
+                    WM_RBUTTONUP => {
+                        show_tray_menu(hwnd);
+                        return 0;
+                    }
+                    _ => {}
+                },
+                WM_COMMAND => match wparam & 0xffff {
                     MENU_OPEN => {
                         let _ = launch_or_focus_ui();
                         return 0;
@@ -102,7 +98,7 @@ unsafe fn windows_tray_main() -> Result<()> {
                 load_locallink_icon().unwrap_or_else(|| LoadIconW(null_mut(), IDI_APPLICATION));
             write_wide_fixed(&mut nid.szTip, "LocalLink");
 
-            Shell_NotifyIconW(NIM_ADD, &mut nid);
+            Shell_NotifyIconW(NIM_ADD, &nid);
         }
     }
 
@@ -112,7 +108,7 @@ unsafe fn windows_tray_main() -> Result<()> {
             nid.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
             nid.hWnd = hwnd;
             nid.uID = TRAY_UID;
-            Shell_NotifyIconW(NIM_DELETE, &mut nid);
+            Shell_NotifyIconW(NIM_DELETE, &nid);
         }
     }
 
