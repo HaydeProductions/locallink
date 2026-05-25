@@ -14,10 +14,8 @@ mod eframe {
     pub type AppCreator = Box<
         dyn FnOnce(
             &CreationContext<'_>,
-        ) -> crate::real_std::result::Result<
-            Box<dyn App>,
-            Box<dyn Error + Send + Sync>,
-        > + 'static,
+        ) -> crate::real_std::result::Result<Box<dyn App>, Box<dyn Error + Send + Sync>>
+            + 'static,
     >;
 
     pub fn run_native(
@@ -142,41 +140,6 @@ mod eframe {
     pub mod egui {
         pub use crate::real_eframe::egui::*;
 
-        pub struct CentralPanel {
-            inner: crate::real_eframe::egui::CentralPanel,
-        }
-
-        impl Default for CentralPanel {
-            fn default() -> Self {
-                Self {
-                    inner: crate::real_eframe::egui::CentralPanel::default(),
-                }
-            }
-        }
-
-        impl CentralPanel {
-            pub fn show<R>(
-                self,
-                ctx: &Context,
-                add_contents: impl FnOnce(&mut Ui) -> R,
-            ) -> InnerResponse<R> {
-                self.inner.show(ctx, |ui| {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button("Stop Core").clicked() {
-                            crate::ui_shutdown_core();
-                        }
-
-                        if ui.button("Start Core").clicked() {
-                            let _ = crate::ui_start_core_hidden();
-                        }
-                    });
-
-                    ui.add_space(6.0);
-                    add_contents(ui)
-                })
-            }
-        }
-
         pub struct Window<'open> {
             inner: crate::real_eframe::egui::Window<'open>,
         }
@@ -222,61 +185,6 @@ mod eframe {
             }
         }
     }
-}
-
-fn ui_start_core_hidden() -> crate::real_std::io::Result<crate::real_std::process::Child> {
-    let current = crate::real_std::env::current_exe()?;
-    let dir = current
-        .parent()
-        .ok_or_else(|| crate::real_std::io::Error::other("could not determine UI folder"))?;
-    let core = dir.join("locallink-core.exe");
-
-    let mut command = crate::real_std::process::Command::new(core);
-    command
-        .current_dir(dir)
-        .stdin(crate::real_std::process::Stdio::null())
-        .stdout(crate::real_std::process::Stdio::null())
-        .stderr(crate::real_std::process::Stdio::null());
-
-    #[cfg(target_os = "windows")]
-    {
-        use crate::real_std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
-
-    command.spawn()
-}
-
-fn ui_shutdown_core() {
-    let _ = ui_send_shutdown_api();
-
-    #[cfg(target_os = "windows")]
-    for image in ["locallink-addon-clipboard.exe", "locallink-core.exe"] {
-        let mut command = crate::real_std::process::Command::new("taskkill.exe");
-        command
-            .args(["/F", "/T", "/IM", image])
-            .stdin(crate::real_std::process::Stdio::null())
-            .stdout(crate::real_std::process::Stdio::null())
-            .stderr(crate::real_std::process::Stdio::null());
-
-        #[cfg(target_os = "windows")]
-        {
-            use crate::real_std::os::windows::process::CommandExt;
-            command.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        }
-
-        let _ = command.spawn().and_then(|mut child| child.wait());
-    }
-}
-
-fn ui_send_shutdown_api() -> crate::real_std::io::Result<()> {
-    use crate::real_std::io::Write;
-
-    let mut stream = crate::real_std::net::TcpStream::connect("127.0.0.1:47900")?;
-    stream.write_all(br#"{"cmd":"shutdown"}"#)?;
-    stream.write_all(b"\n")?;
-    stream.flush()?;
-    Ok(())
 }
 
 #[allow(dead_code)]
