@@ -86,48 +86,6 @@ unsafe fn windows_tray_main() -> Result<()> {
         }
     }
 
-    let instance = GetModuleHandleW(null());
-    let class_name = wide_null("LocalLinkTrayWindow");
-
-    let wnd_class = WNDCLASSW {
-        style: CS_HREDRAW | CS_VREDRAW,
-        lpfnWndProc: Some(wnd_proc),
-        hInstance: instance,
-        lpszClassName: class_name.as_ptr(),
-        ..zeroed()
-    };
-
-    RegisterClassW(&wnd_class);
-
-    let hwnd = CreateWindowExW(
-        0,
-        class_name.as_ptr(),
-        wide_null("LocalLink Tray").as_ptr(),
-        WS_OVERLAPPED,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        null_mut(),
-        null_mut(),
-        instance,
-        null_mut::<c_void>(),
-    );
-
-    if hwnd.is_null() {
-        bail!("could not create tray window");
-    }
-
-    add_tray_icon(hwnd);
-
-    let mut msg: MSG = zeroed();
-    while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
-    }
-
-    Ok(())
-
     fn add_tray_icon(hwnd: HWND) {
         unsafe {
             let mut nid: NOTIFYICONDATAW = zeroed();
@@ -196,6 +154,48 @@ unsafe fn windows_tray_main() -> Result<()> {
             dest[N - 1] = 0;
         }
     }
+
+    let instance = GetModuleHandleW(null());
+    let class_name = wide_null("LocalLinkTrayWindow");
+
+    let wnd_class = WNDCLASSW {
+        style: CS_HREDRAW | CS_VREDRAW,
+        lpfnWndProc: Some(wnd_proc),
+        hInstance: instance,
+        lpszClassName: class_name.as_ptr(),
+        ..zeroed()
+    };
+
+    RegisterClassW(&wnd_class);
+
+    let hwnd = CreateWindowExW(
+        0,
+        class_name.as_ptr(),
+        wide_null("LocalLink Tray").as_ptr(),
+        WS_OVERLAPPED,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        null_mut(),
+        null_mut(),
+        instance,
+        null_mut::<c_void>(),
+    );
+
+    if hwnd.is_null() {
+        bail!("could not create tray window");
+    }
+
+    add_tray_icon(hwnd);
+
+    let mut msg: MSG = zeroed();
+    while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
@@ -209,7 +209,7 @@ fn launch_or_focus_ui() -> Result<()> {
         .parent()
         .ok_or_else(|| anyhow::anyhow!("could not determine LocalLink folder"))?;
 
-    Command::new(ui)
+    Command::new(&ui)
         .current_dir(dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
