@@ -479,6 +479,7 @@ pub async fn handle_connection(
     let mut registered = false;
     let mut heartbeat_started = false;
     let mut benchmark_started = false;
+    let mut highest_recv_seq = 0u64;
 
     let mut bench_active = false;
     let mut bench_bytes: u64 = 0;
@@ -500,6 +501,15 @@ pub async fn handle_connection(
             let Some(ref crypto_state) = crypto else {
                 bail!("received encrypted frame before secure session was established");
             };
+
+            if frame.seq == 0 || frame.seq <= highest_recv_seq {
+                bail!(
+                    "replayed or non-monotonic encrypted frame from {peer_name}: seq={} highest={}",
+                    frame.seq,
+                    highest_recv_seq
+                );
+            }
+            highest_recv_seq = frame.seq;
 
             let (inner_kind, inner_payload) = crypto_state.decrypt(frame.seq, &frame.payload)?;
 
@@ -578,6 +588,18 @@ pub async fn handle_connection(
             FRAME_AUTH_RESPONSE => {
                 let response: AuthResponse = serde_json::from_slice(&frame.payload)?;
 
+                if let Some(hello_device_id) = peer_device_id.as_deref() {
+                    if hello_device_id != response.device_id {
+                        bail!(
+                            "peer identity mismatch: HELLO device_id={} auth_response device_id={}",
+                            hello_device_id,
+                            response.device_id
+                        );
+                    }
+                } else {
+                    peer_device_id = Some(response.device_id.clone());
+                }
+
                 let received = STANDARD
                     .decode(response.hmac_b64)
                     .context("invalid auth response hmac")?;
@@ -589,10 +611,6 @@ pub async fn handle_connection(
                 }
 
                 auth_ok = true;
-
-                if peer_device_id.is_none() {
-                    peer_device_id = Some(response.device_id.clone());
-                }
 
                 println!("PSK authentication OK for {}", response.device_id);
 
