@@ -1,11 +1,13 @@
 use anyhow::{bail, Context, Result};
 use serde_json::json;
+use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 const LOCAL_API_ADDR: &str = "127.0.0.1:47900";
+const TRAY_ICON_B64: &str = include_str!("../../assets/locallink-tray.ico.b64");
 
 #[cfg(not(target_os = "windows"))]
 fn main() -> Result<()> {
@@ -30,11 +32,12 @@ unsafe fn windows_tray_main() -> Result<()> {
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
-        DispatchMessageW, GetCursorPos, GetMessageW, LoadIconW, PostQuitMessage, RegisterClassW,
-        SetForegroundWindow, TrackPopupMenu, TranslateMessage, CS_HREDRAW, CS_VREDRAW,
-        CW_USEDEFAULT, HMENU, IDI_APPLICATION, MF_SEPARATOR, MF_STRING, MSG, TPM_BOTTOMALIGN,
-        TPM_LEFTALIGN, TPM_RIGHTBUTTON, WM_APP, WM_COMMAND, WM_DESTROY, WM_LBUTTONUP,
-        WM_RBUTTONUP, WNDCLASSW, WS_OVERLAPPED,
+        DispatchMessageW, GetCursorPos, GetMessageW, LoadIconW, LoadImageW, PostQuitMessage,
+        RegisterClassW, SetForegroundWindow, TrackPopupMenu, TranslateMessage, CS_HREDRAW,
+        CS_VREDRAW, CW_USEDEFAULT, HMENU, IDI_APPLICATION, IMAGE_ICON, LR_DEFAULTSIZE,
+        LR_LOADFROMFILE, MF_SEPARATOR, MF_STRING, MSG, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
+        TPM_RIGHTBUTTON, WM_APP, WM_COMMAND, WM_DESTROY, WM_LBUTTONUP, WM_RBUTTONUP,
+        WNDCLASSW, WS_OVERLAPPED,
     };
 
     const TRAY_UID: u32 = 1;
@@ -94,7 +97,7 @@ unsafe fn windows_tray_main() -> Result<()> {
             nid.uID = TRAY_UID;
             nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
             nid.uCallbackMessage = WM_TRAYICON;
-            nid.hIcon = LoadIconW(null_mut(), IDI_APPLICATION);
+            nid.hIcon = load_locallink_icon().unwrap_or_else(|| LoadIconW(null_mut(), IDI_APPLICATION));
             write_wide_fixed(&mut nid.szTip, "LocalLink");
 
             Shell_NotifyIconW(NIM_ADD, &mut nid);
@@ -137,6 +140,28 @@ unsafe fn windows_tray_main() -> Result<()> {
                 null(),
             );
             DestroyMenu(menu);
+        }
+    }
+
+    fn load_locallink_icon() -> Option<windows_sys::Win32::UI::WindowsAndMessaging::HICON> {
+        let path = write_tray_icon_file().ok()?;
+        let wide = wide_null(&path.display().to_string());
+
+        let handle = unsafe {
+            LoadImageW(
+                null_mut(),
+                wide.as_ptr(),
+                IMAGE_ICON,
+                0,
+                0,
+                LR_LOADFROMFILE | LR_DEFAULTSIZE,
+            )
+        };
+
+        if handle.is_null() {
+            None
+        } else {
+            Some(handle)
         }
     }
 
@@ -194,6 +219,21 @@ unsafe fn windows_tray_main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn write_tray_icon_file() -> Result<PathBuf> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    let appdata = std::env::var("APPDATA").context("APPDATA environment variable not found")?;
+    let dir = PathBuf::from(appdata).join("LocalLink").join("assets");
+    fs::create_dir_all(&dir)?;
+
+    let icon_path = dir.join("locallink-tray.ico");
+    let icon_bytes = STANDARD.decode(TRAY_ICON_B64.trim())?;
+    fs::write(&icon_path, icon_bytes)?;
+
+    Ok(icon_path)
 }
 
 #[cfg(target_os = "windows")]
