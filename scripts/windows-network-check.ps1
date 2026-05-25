@@ -30,14 +30,15 @@ $adapters = Get-TargetAdapters
 $adapters | Select-Object Name, ifIndex, Status, MacAddress, InterfaceDescription | Format-Table -AutoSize
 
 Write-Section "IPv6 binding"
-foreach ($adapter in $adapters) {
+$ipv6Rows = foreach ($adapter in $adapters) {
     $binding = Get-NetAdapterBinding -Name $adapter.Name -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue
     [PSCustomObject]@{
         Name = $adapter.Name
         ifIndex = $adapter.ifIndex
         IPv6Enabled = if ($binding) { $binding.Enabled } else { "Unknown" }
     }
-} | Format-Table -AutoSize
+}
+$ipv6Rows | Format-Table -AutoSize
 
 Write-Section "Network profile"
 Get-NetConnectionProfile | Select-Object Name, InterfaceAlias, InterfaceIndex, NetworkCategory | Format-Table -AutoSize
@@ -46,10 +47,15 @@ Write-Section "LocalLink firewall rules"
 $rules = Get-NetFirewallRule -DisplayName "LocalLink*" -ErrorAction SilentlyContinue
 if ($rules) {
     $rules | Select-Object DisplayName, Enabled, Direction, Action, Profile | Format-Table -AutoSize
-    $rules | ForEach-Object {
-        Get-NetFirewallPortFilter -AssociatedNetFirewallRule $_ -ErrorAction SilentlyContinue |
-            Select-Object @{Name="Rule"; Expression={$_.InstanceID}}, Protocol, LocalPort
-    } | Format-Table -AutoSize
+
+    $portRows = foreach ($rule in $rules) {
+        Get-NetFirewallPortFilter -AssociatedNetFirewallRule $rule -ErrorAction SilentlyContinue |
+            Select-Object @{Name="Rule"; Expression={$rule.DisplayName}}, Protocol, LocalPort
+    }
+
+    if ($portRows) {
+        $portRows | Format-Table -AutoSize
+    }
 } else {
     Write-Host "No LocalLink firewall rules found."
 }
