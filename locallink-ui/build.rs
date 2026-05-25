@@ -25,6 +25,18 @@ fn main() {
 
     generated = must_replace(
         generated,
+        "            .show(ctx, |ui| {\n                ui.heading(\"Settings\");",
+        "            .show(ctx, |ui| {\n                egui::ScrollArea::vertical()\n                    .auto_shrink([false, false])\n                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)\n                    .show(ui, |ui| {\n                        ui.heading(\"Settings\");",
+    );
+
+    generated = must_replace(
+        generated,
+        "                glass_panel(ui, |ui| {\n                    ui.heading(\"Messages\");\n\n                    egui::ScrollArea::vertical()\n                        .max_height(130.0)\n                        .show(ui, |ui| {\n                            for line in &self.log {\n                                ui.label(line);\n                            }\n                        });\n\n                    if ui\n                        .add(secondary_button(\"Clear\"))\n                        .on_hover_cursor(egui::CursorIcon::PointingHand)\n                        .clicked()\n                    {\n                        self.log.clear();\n                    }\n                });\n            });\n\n        self.show_settings = open;",
+        "                glass_panel(ui, |ui| {\n                    ui.heading(\"Messages\");\n\n                    egui::ScrollArea::vertical()\n                        .max_height(130.0)\n                        .show(ui, |ui| {\n                            for line in &self.log {\n                                ui.label(line);\n                            }\n                        });\n\n                    if ui\n                        .add(secondary_button(\"Clear\"))\n                        .on_hover_cursor(egui::CursorIcon::PointingHand)\n                        .clicked()\n                    {\n                        self.log.clear();\n                    }\n                });\n                    });\n            });\n\n        self.show_settings = open;",
+    );
+
+    generated = must_replace(
+        generated,
         "                ui.add_space(12.0);\n\n                glass_panel(ui, |ui| {\n                    ui.horizontal_wrapped(|ui| {\n                        ui.heading(\"Advanced\");",
         "                ui.add_space(12.0);\n\n                self.network_requirements_panel(ui);\n\n                ui.add_space(12.0);\n\n                glass_panel(ui, |ui| {\n                    ui.horizontal_wrapped(|ui| {\n                        ui.heading(\"Advanced\");",
     );
