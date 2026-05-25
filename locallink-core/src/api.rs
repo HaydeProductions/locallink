@@ -688,7 +688,13 @@ async fn handle_request(
         "poll_events" => {
             let max_events = req.max_events.unwrap_or(100).clamp(1, 1000);
             let consumer_id = req.consumer_id.as_deref().unwrap_or("default");
-            let response = take_events(events.clone(), consumer_id, req.service.as_deref(), max_events).await;
+            let response = take_events(
+                events.clone(),
+                consumer_id,
+                req.service.as_deref(),
+                max_events,
+            )
+            .await;
 
             Ok(serde_json::to_string(&ok(response))?)
         }
