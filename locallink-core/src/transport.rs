@@ -98,7 +98,11 @@ impl EventStore {
             self.events.pop_front();
         }
 
-        let oldest_seq = self.events.front().map(|(seq, _)| *seq).unwrap_or(self.next_seq);
+        let oldest_seq = self
+            .events
+            .front()
+            .map(|(seq, _)| *seq)
+            .unwrap_or(self.next_seq);
         self.cursors.retain(|_, cursor| *cursor >= oldest_seq);
     }
 
@@ -256,8 +260,16 @@ pub async fn connect_to_peer(
 
     match TcpStream::connect(peer_addr).await {
         Ok(stream) => {
-            if let Err(err) =
-                handle_connection(cfg, opts, stream, "outbound", peer_macs, connections, events).await
+            if let Err(err) = handle_connection(
+                cfg,
+                opts,
+                stream,
+                "outbound",
+                peer_macs,
+                connections,
+                events,
+            )
+            .await
             {
                 eprintln!("Outbound connection to {peer_id} ended: {err}");
             }
@@ -686,7 +698,10 @@ pub async fn handle_connection(
                 if !trust_bound && !post_auth_macs.is_empty() {
                     register_device_id_for_macs(&post_auth_macs, &response.device_id)?;
                     trust_bound = true;
-                    println!("Bound authenticated device ID {} to trusted MAC hints", response.device_id);
+                    println!(
+                        "Bound authenticated device ID {} to trusted MAC hints",
+                        response.device_id
+                    );
                 }
 
                 if crypto.is_none() {
