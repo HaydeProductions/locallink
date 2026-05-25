@@ -161,9 +161,19 @@ fn start_addon_process_manager(
 ) {
     tokio::spawn(async move {
         let mut children = HashMap::<String, Child>::new();
+        let mut suppressed_until_next_connection = HashSet::<String>::new();
+        let mut had_connections = false;
 
         loop {
             let has_connections = !connections.lock().await.is_empty();
+
+            if !has_connections {
+                suppressed_until_next_connection.clear();
+            } else if !had_connections {
+                suppressed_until_next_connection.clear();
+            }
+            had_connections = has_connections;
+
             let addon_snapshot = addons.lock().await.clone();
 
             let wanted: HashMap<String, AddonRecord> = if has_connections {
@@ -176,6 +186,8 @@ fn start_addon_process_manager(
                 HashMap::new()
             };
 
+            suppressed_until_next_connection.retain(|id| wanted.contains_key(id));
+
             let running_ids: Vec<String> = children.keys().cloned().collect();
 
             for id in running_ids {
@@ -186,7 +198,10 @@ fn start_addon_process_manager(
 
                 if exited {
                     children.remove(&id);
-                    eprintln!("Add-on process exited: {id}");
+                    suppressed_until_next_connection.insert(id.clone());
+                    eprintln!(
+                        "Add-on process exited: {id}. It will not be restarted until the next connection cycle."
+                    );
                     continue;
                 }
 
@@ -200,7 +215,7 @@ fn start_addon_process_manager(
             }
 
             for (id, addon) in wanted {
-                if children.contains_key(&id) {
+                if children.contains_key(&id) || suppressed_until_next_connection.contains(&id) {
                     continue;
                 }
 
@@ -210,7 +225,11 @@ fn start_addon_process_manager(
                         children.insert(id, child);
                     }
                     Err(err) => {
-                        eprintln!("Could not start add-on {}: {err}", addon.name);
+                        suppressed_until_next_connection.insert(id);
+                        eprintln!(
+                            "Could not start add-on {}: {err}. It will not be retried until the next connection cycle.",
+                            addon.name
+                        );
                     }
                 }
             }
