@@ -29,8 +29,7 @@ unsafe fn windows_tray_main() -> Result<()> {
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Shell::{
-        Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE,
-        NOTIFYICONDATAW,
+        Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
@@ -38,8 +37,8 @@ unsafe fn windows_tray_main() -> Result<()> {
         RegisterClassW, SetForegroundWindow, TrackPopupMenu, TranslateMessage, CS_HREDRAW,
         CS_VREDRAW, CW_USEDEFAULT, HMENU, IDI_APPLICATION, IMAGE_ICON, LR_DEFAULTSIZE,
         LR_LOADFROMFILE, MF_SEPARATOR, MF_STRING, MSG, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
-        TPM_RIGHTBUTTON, WM_APP, WM_COMMAND, WM_DESTROY, WM_LBUTTONUP, WM_RBUTTONUP,
-        WNDCLASSW, WS_OVERLAPPED,
+        TPM_RIGHTBUTTON, WM_APP, WM_COMMAND, WM_DESTROY, WM_LBUTTONUP, WM_RBUTTONUP, WNDCLASSW,
+        WS_OVERLAPPED,
     };
 
     const TRAY_UID: u32 = 1;
@@ -99,7 +98,8 @@ unsafe fn windows_tray_main() -> Result<()> {
             nid.uID = TRAY_UID;
             nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
             nid.uCallbackMessage = WM_TRAYICON;
-            nid.hIcon = load_locallink_icon().unwrap_or_else(|| LoadIconW(null_mut(), IDI_APPLICATION));
+            nid.hIcon =
+                load_locallink_icon().unwrap_or_else(|| LoadIconW(null_mut(), IDI_APPLICATION));
             write_wide_fixed(&mut nid.szTip, "LocalLink");
 
             Shell_NotifyIconW(NIM_ADD, &mut nid);
@@ -265,11 +265,14 @@ fn focus_existing_ui_window() -> bool {
     unsafe {
         use std::ptr::null;
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            FindWindowW, IsIconic, SetForegroundWindow, SetWindowPos, ShowWindow, SW_RESTORE,
-            SW_SHOW, SWP_NOMOVE, SWP_NOSIZE, HWND_TOP,
+            FindWindowW, IsIconic, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOP,
+            SWP_NOMOVE, SWP_NOSIZE, SW_RESTORE, SW_SHOW,
         };
 
-        let title = "LocalLink".encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
+        let title = "LocalLink"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
         let hwnd = FindWindowW(null(), title.as_ptr());
 
         if hwnd.is_null() {
@@ -331,7 +334,11 @@ fn api_request(req: serde_json::Value) -> Result<serde_json::Value> {
 
 #[cfg(target_os = "windows")]
 fn kill_local_processes_for_exit() {
-    let names = ["LocalLink.exe", "locallink-addon-clipboard.exe", "locallink-core.exe"];
+    let names = [
+        "LocalLink.exe",
+        "locallink-addon-clipboard.exe",
+        "locallink-core.exe",
+    ];
 
     for name in names {
         let _ = Command::new("taskkill.exe")
