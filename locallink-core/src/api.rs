@@ -6,11 +6,11 @@ use crate::config::{
 use crate::discovery::Peer;
 use crate::transport::{
     close_channel, connect_to_peer, disconnect_peer, open_channel, send_channel_data,
-    send_service_message, ApiEvent, ConnectionRegistry, EventQueue, RunOptions,
+    send_service_message, take_events, ApiEvent, ConnectionRegistry, EventQueue, RunOptions,
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
@@ -43,6 +43,9 @@ struct ApiRequest {
 
     #[serde(default)]
     wait_ms: Option<u64>,
+
+    #[serde(default)]
+    consumer_id: Option<String>,
 
     #[serde(default)]
     mac: Option<String>,
@@ -446,6 +449,7 @@ async fn handle_request(
             let connecting_connect = connecting.clone();
             let peer_id_connect = peer.device_id.clone();
             let peer_addr = peer.addr;
+            let peer_macs = peer.macs.clone();
 
             tokio::spawn(async move {
                 connect_to_peer(
@@ -453,6 +457,7 @@ async fn handle_request(
                     opts_connect,
                     peer_addr,
                     peer_id_connect.clone(),
+                    peer_macs,
                     connections_connect,
                     events_connect,
                 )
@@ -682,8 +687,8 @@ async fn handle_request(
 
         "poll_events" => {
             let max_events = req.max_events.unwrap_or(100).clamp(1, 1000);
-            let response =
-                take_matching_events(events.clone(), req.service.as_deref(), max_events).await;
+            let consumer_id = req.consumer_id.as_deref().unwrap_or("default");
+            let response = take_events(events.clone(), consumer_id, req.service.as_deref(), max_events).await;
 
             Ok(serde_json::to_string(&ok(response))?)
         }
@@ -691,11 +696,17 @@ async fn handle_request(
         "wait_events" => {
             let max_events = req.max_events.unwrap_or(100).clamp(1, 1000);
             let wait_ms = req.wait_ms.unwrap_or(30_000).clamp(1, 30_000);
+            let consumer_id = req.consumer_id.unwrap_or_else(|| "default".to_string());
             let deadline = Instant::now() + Duration::from_millis(wait_ms);
 
             loop {
-                let response =
-                    take_matching_events(events.clone(), req.service.as_deref(), max_events).await;
+                let response = take_events(
+                    events.clone(),
+                    &consumer_id,
+                    req.service.as_deref(),
+                    max_events,
+                )
+                .await;
 
                 if !response.is_empty() || Instant::now() >= deadline {
                     break Ok(serde_json::to_string(&ok(response))?);
@@ -709,30 +720,4 @@ async fn handle_request(
             "unknown command: {other}"
         )))?),
     }
-}
-
-async fn take_matching_events(
-    events: EventQueue,
-    service_filter: Option<&str>,
-    max_events: usize,
-) -> Vec<ApiEvent> {
-    let mut q = events.lock().await;
-    let mut taken = Vec::new();
-    let mut kept = VecDeque::new();
-
-    while let Some(event) = q.pop_front() {
-        let service_matches = match service_filter {
-            Some(service) => event.service == service,
-            None => true,
-        };
-
-        if service_matches && taken.len() < max_events {
-            taken.push(event);
-        } else {
-            kept.push_back(event);
-        }
-    }
-
-    *q = kept;
-    taken
 }
