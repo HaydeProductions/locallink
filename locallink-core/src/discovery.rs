@@ -37,7 +37,27 @@ pub async fn discovery_loop(
     .await?;
 
     let multicast: Ipv6Addr = MULTICAST_ADDR.parse()?;
-    socket.join_multicast_v6(&multicast, 0)?;
+    let interface_indices = multicast_interface_indices();
+    let mut joined_any = false;
+
+    for interface_id in &interface_indices {
+        match socket.join_multicast_v6(&multicast, *interface_id) {
+            Ok(()) => {
+                joined_any = true;
+                println!("Discovery joined [{MULTICAST_ADDR}] on interface {interface_id}");
+            }
+            Err(err) => {
+                eprintln!(
+                    "Discovery could not join [{MULTICAST_ADDR}] on interface {interface_id}: {err}"
+                );
+            }
+        }
+    }
+
+    if !joined_any {
+        socket.join_multicast_v6(&multicast, 0)?;
+        println!("Discovery joined [{MULTICAST_ADDR}] on default interface");
+    }
 
     let send_socket = UdpSocket::bind(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0)).await?;
 
@@ -56,16 +76,19 @@ pub async fn discovery_loop(
     let encoded = serde_json::to_vec(&announce)?;
 
     println!("Discovery started on UDP [{MULTICAST_ADDR}]:{DISCOVERY_PORT}");
+    println!("Discovery interfaces: {:?}", interface_indices);
     println!("Connection mode: manual only");
     println!("Local MAC hints: {}", announce.macs.join(", "));
 
     start_discovery_receiver(socket, cfg.clone(), peers);
 
     loop {
-        let target = SocketAddrV6::new(multicast, DISCOVERY_PORT, 0, 0);
+        for interface_id in &interface_indices {
+            let target = SocketAddrV6::new(multicast, DISCOVERY_PORT, 0, *interface_id);
 
-        if let Err(err) = send_socket.send_to(&encoded, target).await {
-            eprintln!("Discovery send error: {err}");
+            if let Err(err) = send_socket.send_to(&encoded, target).await {
+                eprintln!("Discovery send error on interface {interface_id}: {err}");
+            }
         }
 
         sleep(Duration::from_secs(2)).await;
@@ -125,6 +148,38 @@ fn start_discovery_receiver(
             }
         }
     });
+}
+
+fn multicast_interface_indices() -> Vec<u32> {
+    let mut indices = Vec::new();
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(output) = std::process::Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -ExpandProperty ifIndex",
+            ])
+            .output()
+        {
+            let text = String::from_utf8_lossy(&output.stdout);
+
+            for line in text.lines() {
+                if let Ok(index) = line.trim().parse::<u32>() {
+                    if index != 0 && !indices.contains(&index) {
+                        indices.push(index);
+                    }
+                }
+            }
+        }
+    }
+
+    if indices.is_empty() {
+        indices.push(0);
+    }
+
+    indices
 }
 
 fn local_macs() -> Vec<String> {
