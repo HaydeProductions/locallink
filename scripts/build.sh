@@ -12,11 +12,15 @@ cargo build --release
 echo "Packaging LocalLink..."
 rm -rf "$DIST"
 mkdir -p "$DIST/addons/clipboard-sync"
+mkdir -p "$DIST/scripts"
 
 cp "$ROOT/target/release/locallink-core.exe" "$DIST/locallink-core.exe"
 cp "$ROOT/target/release/locallink-ui.exe" "$DIST/LocalLink.exe"
 cp "$ROOT/target/release/locallink-tray.exe" "$DIST/LocalLinkTray.exe"
 cp "$ROOT/target/release/locallink-addon-clipboard.exe" "$DIST/addons/clipboard-sync/locallink-addon-clipboard.exe"
+cp "$ROOT/scripts/windows-network-check.ps1" "$DIST/scripts/windows-network-check.ps1"
+cp "$ROOT/scripts/windows-network-setup.ps1" "$DIST/scripts/windows-network-setup.ps1"
+cp "$ROOT/scripts/windows-network-repair.ps1" "$DIST/scripts/windows-network-repair.ps1"
 
 cat > "$DIST/addons/clipboard-sync/manifest.json" <<'JSON'
 {
@@ -46,6 +50,11 @@ Run core directly:
 
 Run clipboard sync addon:
   ./addons/clipboard-sync/locallink-addon-clipboard.exe
+
+Network setup scripts:
+  ./scripts/windows-network-check.ps1
+  ./scripts/windows-network-repair.ps1
+  ./scripts/windows-network-setup.ps1
 
 AppData:
   %APPDATA%\LocalLink
