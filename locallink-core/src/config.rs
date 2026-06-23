@@ -15,6 +15,46 @@ pub struct Config {
 
     #[serde(default)]
     pub psk_b64: Option<String>,
+
+    #[serde(default)]
+    pub startup: StartupPreferences,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StartupPreferences {
+    #[serde(default = "default_launch_ui")]
+    pub launch_ui: bool,
+
+    #[serde(default)]
+    pub use_tray: bool,
+}
+
+impl Default for StartupPreferences {
+    fn default() -> Self {
+        Self {
+            launch_ui: true,
+            use_tray: false,
+        }
+    }
+}
+
+impl StartupPreferences {
+    pub fn repair(&mut self) -> bool {
+        if !self.launch_ui && !self.use_tray {
+            self.launch_ui = true;
+            return true;
+        }
+
+        false
+    }
+
+    pub fn is_valid(&self) -> bool {
+        self.launch_ui || self.use_tray
+    }
+}
+
+fn default_launch_ui() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -145,7 +185,10 @@ pub fn load_or_create_config() -> Result<Config> {
 
     if path.exists() {
         let text = fs::read_to_string(&path)?;
-        let cfg: Config = serde_json::from_str(&text)?;
+        let mut cfg: Config = serde_json::from_str(&text)?;
+        if cfg.startup.repair() {
+            save_config(&cfg)?;
+        }
         return Ok(cfg);
     }
 
@@ -155,6 +198,7 @@ pub fn load_or_create_config() -> Result<Config> {
         device_id: Uuid::new_v4().to_string(),
         device_name,
         psk_b64: None,
+        startup: StartupPreferences::default(),
     };
 
     save_config(&cfg)?;
@@ -163,7 +207,10 @@ pub fn load_or_create_config() -> Result<Config> {
 
 pub fn save_config(cfg: &Config) -> Result<()> {
     init_app_dirs()?;
-    let text = serde_json::to_string_pretty(cfg)?;
+    let mut cfg = cfg.clone();
+    cfg.startup.repair();
+    anyhow::ensure!(cfg.startup.is_valid(), "at least one startup entry point must be enabled");
+    let text = serde_json::to_string_pretty(&cfg)?;
     atomic_write(&config_path()?, text.as_bytes())?;
     Ok(())
 }
