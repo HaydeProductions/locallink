@@ -3,6 +3,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "windows")]
+use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AddonManifest {
@@ -76,6 +78,7 @@ pub fn load_addon_manifests() -> Result<Vec<AddonRecord>> {
     }
 
     records.sort_by(|a, b| a.name.cmp(&b.name));
+    stop_disabled_addon_executables_best_effort(&records);
     Ok(records)
 }
 
@@ -107,4 +110,48 @@ fn load_one_manifest(addon_dir: &Path, manifest_path: &PathBuf) -> Result<AddonR
         manifest_path: manifest_path.display().to_string(),
         addon_dir: addon_dir.display().to_string(),
     })
+}
+
+fn stop_disabled_addon_executables_best_effort(records: &[AddonRecord]) {
+    for addon in records {
+        if addon.enabled || addon.executable.trim().is_empty() {
+            continue;
+        }
+
+        if let Err(err) = stop_addon_executable(addon) {
+            eprintln!("Could not stop disabled add-on {}: {err}", addon.name);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn stop_addon_executable(addon: &AddonRecord) -> Result<()> {
+    let exe_path = Path::new(&addon.addon_dir).join(&addon.executable);
+    let exe_path = exe_path.canonicalize().unwrap_or(exe_path);
+    let exe_path = exe_path.display().to_string();
+
+    let script = r#"
+$target = [Environment]::GetEnvironmentVariable('LOCALLINK_ADDON_EXE')
+if ([string]::IsNullOrWhiteSpace($target)) { exit 0 }
+Get-CimInstance Win32_Process |
+    Where-Object { $_.ExecutablePath -eq $target } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+"#;
+
+    let status = Command::new("powershell.exe")
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script])
+        .env("LOCALLINK_ADDON_EXE", exe_path)
+        .status()
+        .context("running disabled add-on stop command")?;
+
+    if !status.success() {
+        anyhow::bail!("disabled add-on stop command exited with {status}");
+    }
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn stop_addon_executable(_addon: &AddonRecord) -> Result<()> {
+    Ok(())
 }
