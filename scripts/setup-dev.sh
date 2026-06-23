@@ -18,6 +18,7 @@ git config --local alias.kill '!f() { root=$(git rev-parse --show-toplevel) && b
 git config --local alias.net-check '!f() { root=$(git rev-parse --show-toplevel) && powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$root/scripts/windows-network-check.ps1" "$@"; }; f'
 git config --local alias.net-repair '!f() { root=$(git rev-parse --show-toplevel) && powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$root/scripts/windows-network-repair.ps1" "$@"; }; f'
 git config --local alias.net-setup '!f() { root=$(git rev-parse --show-toplevel) && powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$root/scripts/windows-network-setup.ps1" "$@"; }; f'
+git config --local alias.aliases "!git config --local --get-regexp '^alias\\.' | sed 's/^alias\\.//'"
 
 git config --local --unset alias.build-local >/dev/null 2>&1 || true
 git config --local --unset alias.run-local >/dev/null 2>&1 || true
@@ -31,3 +32,4 @@ echo "  git kill        # stop LocalLink processes"
 echo "  git net-check   # inspect Windows LocalLink network requirements"
 echo "  git net-repair  # check requirements and request admin repair if needed"
 echo "  git net-setup   # run the Windows network setup script directly"
+echo "  git aliases     # list repo-local Git shortcuts"
