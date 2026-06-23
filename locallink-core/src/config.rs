@@ -209,7 +209,10 @@ pub fn save_config(cfg: &Config) -> Result<()> {
     init_app_dirs()?;
     let mut cfg = cfg.clone();
     cfg.startup.repair();
-    anyhow::ensure!(cfg.startup.is_valid(), "at least one startup entry point must be enabled");
+    anyhow::ensure!(
+        cfg.startup.is_valid(),
+        "at least one startup entry point must be enabled"
+    );
     let text = serde_json::to_string_pretty(&cfg)?;
     atomic_write(&config_path()?, text.as_bytes())?;
     Ok(())
