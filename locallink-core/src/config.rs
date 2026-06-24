@@ -15,6 +15,57 @@ pub struct Config {
 
     #[serde(default)]
     pub psk_b64: Option<String>,
+
+    #[serde(default)]
+    pub startup: StartupPreferences,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StartupPreferences {
+    #[serde(default = "default_startup_launch_ui")]
+    pub launch_ui: bool,
+
+    #[serde(default = "default_startup_use_tray")]
+    pub use_tray: bool,
+}
+
+impl Default for StartupPreferences {
+    fn default() -> Self {
+        Self {
+            launch_ui: default_startup_launch_ui(),
+            use_tray: default_startup_use_tray(),
+        }
+    }
+}
+
+impl StartupPreferences {
+    pub fn is_valid(&self) -> bool {
+        self.launch_ui || self.use_tray
+    }
+
+    pub fn repair_invalid(&mut self) -> bool {
+        if self.is_valid() {
+            return false;
+        }
+
+        self.launch_ui = default_startup_launch_ui();
+        self.use_tray = default_startup_use_tray();
+        true
+    }
+}
+
+fn default_startup_launch_ui() -> bool {
+    true
+}
+
+fn default_startup_use_tray() -> bool {
+    false
+}
+
+impl Config {
+    fn repair_invalid_startup_preferences(&mut self) -> bool {
+        self.startup.repair_invalid()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -145,7 +196,15 @@ pub fn load_or_create_config() -> Result<Config> {
 
     if path.exists() {
         let text = fs::read_to_string(&path)?;
-        let cfg: Config = serde_json::from_str(&text)?;
+        let raw: serde_json::Value = serde_json::from_str(&text)?;
+        let has_startup_preferences = raw.get("startup").is_some();
+        let mut cfg: Config = serde_json::from_value(raw)?;
+        let repaired = cfg.repair_invalid_startup_preferences();
+
+        if repaired || !has_startup_preferences {
+            save_config(&cfg)?;
+        }
+
         return Ok(cfg);
     }
 
@@ -155,6 +214,7 @@ pub fn load_or_create_config() -> Result<Config> {
         device_id: Uuid::new_v4().to_string(),
         device_name,
         psk_b64: None,
+        startup: StartupPreferences::default(),
     };
 
     save_config(&cfg)?;
@@ -163,7 +223,9 @@ pub fn load_or_create_config() -> Result<Config> {
 
 pub fn save_config(cfg: &Config) -> Result<()> {
     init_app_dirs()?;
-    let text = serde_json::to_string_pretty(cfg)?;
+    let mut cfg = cfg.clone();
+    cfg.repair_invalid_startup_preferences();
+    let text = serde_json::to_string_pretty(&cfg)?;
     atomic_write(&config_path()?, text.as_bytes())?;
     Ok(())
 }
@@ -336,4 +398,41 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     }
     fs::rename(&tmp_path, path)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_preferences_default_to_ui_only() {
+        let startup = StartupPreferences::default();
+
+        assert!(startup.launch_ui);
+        assert!(!startup.use_tray);
+        assert!(startup.is_valid());
+    }
+
+    #[test]
+    fn startup_preferences_repair_both_disabled() {
+        let mut startup = StartupPreferences {
+            launch_ui: false,
+            use_tray: false,
+        };
+
+        assert!(startup.repair_invalid());
+        assert_eq!(startup, StartupPreferences::default());
+    }
+
+    #[test]
+    fn startup_preferences_keep_tray_only_valid() {
+        let mut startup = StartupPreferences {
+            launch_ui: false,
+            use_tray: true,
+        };
+
+        assert!(!startup.repair_invalid());
+        assert!(!startup.launch_ui);
+        assert!(startup.use_tray);
+    }
 }
