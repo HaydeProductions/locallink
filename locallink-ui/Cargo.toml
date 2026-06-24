@@ -6,7 +6,7 @@ build = "build.rs"
 
 [[bin]]
 name = "locallink-ui"
-path = "src/core_control_main.rs"
+path = "src/space_control_main.rs"
 
 [dependencies]
 anyhow = "1"
