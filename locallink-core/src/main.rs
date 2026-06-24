@@ -4,6 +4,7 @@ mod api_client;
 mod config;
 mod discovery;
 mod protocol;
+mod spaces;
 mod transport;
 
 use addons::{load_addon_manifests, AddonRecord};
@@ -13,6 +14,7 @@ use config::{
     load_or_create_config, save_config, validate_psk_b64,
 };
 use discovery::Peer;
+use spaces::load_or_create_space_store;
 use std::collections::{HashMap, HashSet};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -75,6 +77,7 @@ async fn main() -> Result<()> {
 
     let cfg = load_or_create_config()?;
     let loaded_addons = load_addon_manifests()?;
+    let loaded_spaces = load_or_create_space_store()?;
 
     println!("LocalLink core prototype");
     println!("Version:     {}", env!("CARGO_PKG_VERSION"));
@@ -82,6 +85,7 @@ async fn main() -> Result<()> {
     println!("Device ID:   {}", cfg.device_id);
     println!("Config:      {}", config_path()?.display());
     println!("Addons:      {}", loaded_addons.len());
+    println!("Spaces:      {}", loaded_spaces.spaces.len());
 
     if cfg.psk_b64.is_none() {
         println!();
