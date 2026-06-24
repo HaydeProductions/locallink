@@ -175,7 +175,10 @@ mod tests {
         let space = &store.spaces[0];
         assert_eq!(space.space_id, "office");
         assert_eq!(space.name, "Office");
-        assert_eq!(space.members, vec!["desktop".to_string(), "laptop".to_string()]);
+        assert_eq!(
+            space.members,
+            vec!["desktop".to_string(), "laptop".to_string()]
+        );
     }
 
     #[test]
