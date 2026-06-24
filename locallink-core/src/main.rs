@@ -21,7 +21,7 @@ use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, Mutex};
 use tokio::time::{sleep, Duration, Instant};
 use transport::{tcp_server, ConnectedPeer, ConnectionRegistry, EventStore, RunOptions};
 
@@ -115,6 +115,7 @@ async fn main() -> Result<()> {
     let events = Arc::new(Mutex::new(EventStore::default()));
     let addons = Arc::new(Mutex::new(Vec::<AddonRecord>::from(loaded_addons)));
     let spaces = Arc::new(Mutex::new(loaded_spaces));
+    let (shutdown_tx, mut shutdown_rx) = broadcast::channel::<()>(4);
 
     let cfg_server = cfg.clone();
     let opts_server = opts.clone();
@@ -139,6 +140,7 @@ async fn main() -> Result<()> {
     let spaces_api = spaces.clone();
     let connecting_api = connecting.clone();
     let opts_api = opts.clone();
+    let shutdown_tx_api = shutdown_tx.clone();
 
     tokio::spawn(async move {
         if let Err(err) = api::local_api_server(
@@ -151,6 +153,7 @@ async fn main() -> Result<()> {
             connecting_api,
             opts_api,
             cfg_api,
+            shutdown_tx_api,
             started_at,
         )
         .await
@@ -159,7 +162,13 @@ async fn main() -> Result<()> {
         }
     });
 
-    discovery::discovery_loop(cfg, opts, peers, connecting, connections, events).await
+    tokio::select! {
+        result = discovery::discovery_loop(cfg, opts, peers, connecting, connections, events) => result,
+        _ = shutdown_rx.recv() => {
+            println!("LocalLink Core shutdown requested");
+            Ok(())
+        }
+    }
 }
 
 fn start_addon_process_manager(

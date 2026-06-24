@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, Mutex};
 use tokio::time::{sleep, timeout, Duration, Instant};
 use uuid::Uuid;
 
@@ -113,6 +113,7 @@ struct ApiContext {
     connecting: Arc<Mutex<HashSet<String>>>,
     opts: RunOptions,
     cfg_for_connect: Config,
+    shutdown_tx: broadcast::Sender<()>,
     started_at: Instant,
 }
 
@@ -126,6 +127,7 @@ pub async fn local_api_server(
     connecting: Arc<Mutex<HashSet<String>>>,
     opts: RunOptions,
     cfg_for_connect: Config,
+    shutdown_tx: broadcast::Sender<()>,
     started_at: Instant,
 ) -> Result<()> {
     let listener = TcpListener::bind(LOCAL_API_ADDR).await?;
@@ -144,6 +146,7 @@ pub async fn local_api_server(
             connecting: connecting.clone(),
             opts: opts.clone(),
             cfg_for_connect: cfg_for_connect.clone(),
+            shutdown_tx: shutdown_tx.clone(),
             started_at,
         };
 
@@ -201,6 +204,7 @@ async fn handle_request(ctx: ApiContext, req: ApiRequest) -> Result<String> {
             "commands": [
                 "status",
                 "paths",
+                "shutdown",
                 "list_peers",
                 "list_connections",
                 "list_trusted_devices",
@@ -239,6 +243,14 @@ async fn handle_request(ctx: ApiContext, req: ApiRequest) -> Result<String> {
         })),
 
         "paths" => json_ok(app_paths()?),
+
+        "shutdown" => {
+            let _ = ctx.shutdown_tx.send(());
+            json_ok(json!({
+                "message": "LocalLink Core shutdown requested"
+            }))
+        }
+
         "list_trusted_devices" => json_ok(load_trusted_devices()?),
 
         "add_trusted_device" => {
@@ -333,7 +345,13 @@ async fn handle_request(ctx: ApiContext, req: ApiRequest) -> Result<String> {
         "poll_events" => {
             let max_events = req.max_events.unwrap_or(100).clamp(1, 1000);
             let consumer_id = req.consumer_id.as_deref().unwrap_or("default");
-            let response = take_events(ctx.events, consumer_id, req.service.as_deref(), max_events).await;
+            let response = take_events(
+                ctx.events,
+                consumer_id,
+                req.service.as_deref(),
+                max_events,
+            )
+            .await;
             json_ok(response)
         }
 
