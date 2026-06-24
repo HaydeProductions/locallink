@@ -377,15 +377,17 @@ async fn handle_request(
                 space_id
             );
 
-            store.spaces.push(SpaceRecord {
+            let mut updated = store.clone();
+            updated.spaces.push(SpaceRecord {
                 space_id: space_id.clone(),
                 name,
                 kind,
                 members: Vec::new(),
                 addons: HashMap::new(),
             });
-            store.validate_and_repair()?;
-            save_space_store(&store)?;
+            updated.validate_and_repair()?;
+            save_space_store(&updated)?;
+            *store = updated;
 
             let response = store
                 .spaces
@@ -406,15 +408,17 @@ async fn handle_request(
                 .ok_or_else(|| anyhow::anyhow!("add_space_member requires peer_id"))?;
 
             let mut store = spaces.lock().await;
-            let space = store
+            let mut updated = store.clone();
+            let space = updated
                 .spaces
                 .iter_mut()
                 .find(|space| space.space_id == space_id)
                 .ok_or_else(|| anyhow::anyhow!("unknown space: {}", space_id))?;
 
             space.members.push(peer_id);
-            store.validate_and_repair()?;
-            save_space_store(&store)?;
+            updated.validate_and_repair()?;
+            save_space_store(&updated)?;
+            *store = updated;
 
             let response = store
                 .spaces
@@ -435,15 +439,17 @@ async fn handle_request(
                 .ok_or_else(|| anyhow::anyhow!("remove_space_member requires peer_id"))?;
 
             let mut store = spaces.lock().await;
-            let space = store
+            let mut updated = store.clone();
+            let space = updated
                 .spaces
                 .iter_mut()
                 .find(|space| space.space_id == space_id)
                 .ok_or_else(|| anyhow::anyhow!("unknown space: {}", space_id))?;
 
             space.members.retain(|member| member != &peer_id);
-            store.validate_and_repair()?;
-            save_space_store(&store)?;
+            updated.validate_and_repair()?;
+            save_space_store(&updated)?;
+            *store = updated;
 
             let response = store
                 .spaces
