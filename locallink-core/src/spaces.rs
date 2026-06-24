@@ -132,3 +132,109 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     fs::rename(&tmp_path, path)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_store_has_no_spaces() {
+        let store = SpaceStore::default();
+
+        assert!(store.spaces.is_empty());
+    }
+
+    #[test]
+    fn members_are_trimmed_sorted_and_deduped() {
+        let mut store = SpaceStore {
+            spaces: vec![SpaceRecord {
+                space_id: "office".to_string(),
+                name: "Office".to_string(),
+                kind: SpaceKind::Group,
+                members: vec![
+                    " laptop ".to_string(),
+                    "desktop".to_string(),
+                    "laptop".to_string(),
+                    "".to_string(),
+                ],
+                addons: HashMap::new(),
+            }],
+        };
+
+        store.validate_and_repair().unwrap();
+
+        assert_eq!(
+            store.spaces[0].members,
+            vec!["desktop".to_string(), "laptop".to_string()]
+        );
+    }
+
+    #[test]
+    fn direct_space_allows_one_member() {
+        let mut store = SpaceStore {
+            spaces: vec![SpaceRecord {
+                space_id: "desktop".to_string(),
+                name: "Desktop".to_string(),
+                kind: SpaceKind::Direct,
+                members: vec!["desktop-peer".to_string()],
+                addons: HashMap::new(),
+            }],
+        };
+
+        assert!(store.validate_and_repair().is_ok());
+    }
+
+    #[test]
+    fn direct_space_rejects_multiple_members() {
+        let mut store = SpaceStore {
+            spaces: vec![SpaceRecord {
+                space_id: "desktop".to_string(),
+                name: "Desktop".to_string(),
+                kind: SpaceKind::Direct,
+                members: vec!["desktop-peer".to_string(), "laptop-peer".to_string()],
+                addons: HashMap::new(),
+            }],
+        };
+
+        assert!(store.validate_and_repair().is_err());
+    }
+
+    #[test]
+    fn group_space_allows_multiple_members() {
+        let mut store = SpaceStore {
+            spaces: vec![SpaceRecord {
+                space_id: "office".to_string(),
+                name: "Office".to_string(),
+                kind: SpaceKind::Group,
+                members: vec!["desktop-peer".to_string(), "laptop-peer".to_string()],
+                addons: HashMap::new(),
+            }],
+        };
+
+        assert!(store.validate_and_repair().is_ok());
+    }
+
+    #[test]
+    fn duplicate_space_ids_are_rejected() {
+        let mut store = SpaceStore {
+            spaces: vec![
+                SpaceRecord {
+                    space_id: "office".to_string(),
+                    name: "Office".to_string(),
+                    kind: SpaceKind::Group,
+                    members: Vec::new(),
+                    addons: HashMap::new(),
+                },
+                SpaceRecord {
+                    space_id: "office".to_string(),
+                    name: "Office Again".to_string(),
+                    kind: SpaceKind::Group,
+                    members: Vec::new(),
+                    addons: HashMap::new(),
+                },
+            ],
+        };
+
+        assert!(store.validate_and_repair().is_err());
+    }
+}
