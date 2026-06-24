@@ -8,6 +8,32 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+fn default_launch_ui() -> bool {
+    true
+}
+
+fn default_use_tray() -> bool {
+    false
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StartupPreferences {
+    #[serde(default = "default_launch_ui")]
+    pub launch_ui: bool,
+
+    #[serde(default = "default_use_tray")]
+    pub use_tray: bool,
+}
+
+impl Default for StartupPreferences {
+    fn default() -> Self {
+        Self {
+            launch_ui: default_launch_ui(),
+            use_tray: default_use_tray(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub device_id: String,
@@ -15,6 +41,9 @@ pub struct Config {
 
     #[serde(default)]
     pub psk_b64: Option<String>,
+
+    #[serde(default)]
+    pub startup: StartupPreferences,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +64,7 @@ pub struct AppPaths {
     pub config_file: String,
     pub trusted_peers_file: String,
     pub trusted_devices_file: String,
+    pub spaces_file: String,
     pub addons_dir: String,
     pub logs_dir: String,
     pub runtime_dir: String,
@@ -57,6 +87,10 @@ pub fn trusted_peers_path() -> Result<PathBuf> {
 
 pub fn trusted_devices_path() -> Result<PathBuf> {
     Ok(app_dir()?.join("trusted-devices.json"))
+}
+
+pub fn spaces_path() -> Result<PathBuf> {
+    Ok(app_dir()?.join("spaces.json"))
 }
 
 pub fn addons_dir() -> Result<PathBuf> {
@@ -85,6 +119,7 @@ pub fn app_paths() -> Result<AppPaths> {
         config_file: config_path()?.display().to_string(),
         trusted_peers_file: trusted_peers_path()?.display().to_string(),
         trusted_devices_file: trusted_devices_path()?.display().to_string(),
+        spaces_file: spaces_path()?.display().to_string(),
         addons_dir: addons_dir()?.display().to_string(),
         logs_dir: logs_dir()?.display().to_string(),
         runtime_dir: runtime_dir()?.display().to_string(),
@@ -108,6 +143,11 @@ pub fn init_app_dirs() -> Result<()> {
     let trusted_devices = trusted_devices_path()?;
     if !trusted_devices.exists() {
         atomic_write(&trusted_devices, b"[]\n")?;
+    }
+
+    let spaces = spaces_path()?;
+    if !spaces.exists() {
+        atomic_write(&spaces, b"{\n  \"spaces\": []\n}\n")?;
     }
 
     Ok(())
@@ -138,6 +178,15 @@ pub fn acquire_single_instance_lock() -> Result<File> {
     }
 }
 
+pub fn repair_startup_preferences(startup: &mut StartupPreferences) -> bool {
+    if startup.launch_ui || startup.use_tray {
+        return false;
+    }
+
+    *startup = StartupPreferences::default();
+    true
+}
+
 pub fn load_or_create_config() -> Result<Config> {
     init_app_dirs()?;
 
@@ -145,7 +194,10 @@ pub fn load_or_create_config() -> Result<Config> {
 
     if path.exists() {
         let text = fs::read_to_string(&path)?;
-        let cfg: Config = serde_json::from_str(&text)?;
+        let mut cfg: Config = serde_json::from_str(&text)?;
+        if repair_startup_preferences(&mut cfg.startup) {
+            save_config(&cfg)?;
+        }
         return Ok(cfg);
     }
 
@@ -155,6 +207,7 @@ pub fn load_or_create_config() -> Result<Config> {
         device_id: Uuid::new_v4().to_string(),
         device_name,
         psk_b64: None,
+        startup: StartupPreferences::default(),
     };
 
     save_config(&cfg)?;
@@ -163,7 +216,9 @@ pub fn load_or_create_config() -> Result<Config> {
 
 pub fn save_config(cfg: &Config) -> Result<()> {
     init_app_dirs()?;
-    let text = serde_json::to_string_pretty(cfg)?;
+    let mut cfg = cfg.clone();
+    repair_startup_preferences(&mut cfg.startup);
+    let text = serde_json::to_string_pretty(&cfg)?;
     atomic_write(&config_path()?, text.as_bytes())?;
     Ok(())
 }
@@ -323,7 +378,7 @@ pub fn psk_bytes(cfg: &Config) -> Result<Vec<u8>> {
     Ok(decoded)
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
