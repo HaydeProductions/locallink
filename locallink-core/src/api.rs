@@ -499,8 +499,17 @@ async fn handle_request(
             let mut deliveries = Vec::new();
 
             for peer_id in peer_ids {
-                match send_service_message(connections.clone(), &peer_id, &service, &data_b64).await
-                {
+                let delivery = crate::transport::send_space_service_message(
+                    connections.clone(),
+                    &peer_id,
+                    &space_id,
+                    &service,
+                    target_peer_id.clone(),
+                    &data_b64,
+                )
+                .await;
+
+                match delivery {
                     Ok(message_id) => deliveries.push(SpaceSendPeerResult {
                         peer_id,
                         ok: true,
