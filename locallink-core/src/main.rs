@@ -132,6 +132,7 @@ async fn main() -> Result<()> {
     let connections_api = runtime_state.connections.clone();
     let events_api = runtime_state.events.clone();
     let addons_api = runtime_state.addons.clone();
+    let spaces_api = runtime_state.spaces.clone();
     let connecting_api = runtime_state.connecting.clone();
     let opts_api = opts.clone();
 
@@ -142,6 +143,7 @@ async fn main() -> Result<()> {
             connections_api,
             events_api,
             addons_api,
+            spaces_api,
             connecting_api,
             opts_api,
             cfg_api,
