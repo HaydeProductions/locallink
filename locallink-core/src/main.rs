@@ -122,7 +122,10 @@ async fn main() -> Result<()> {
         }
     });
 
-    start_addon_process_manager(runtime_state.addons.clone(), runtime_state.connections.clone());
+    start_addon_process_manager(
+        runtime_state.addons.clone(),
+        runtime_state.connections.clone(),
+    );
 
     let cfg_api = cfg.clone();
     let peers_api = runtime_state.peers.clone();
