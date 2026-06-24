@@ -66,6 +66,7 @@ impl SpaceStore {
             }
 
             space.members = normalize_members(&space.members);
+            normalize_addons(&mut space.addons)?;
 
             if space.kind == SpaceKind::Direct {
                 anyhow::ensure!(
@@ -77,6 +78,47 @@ impl SpaceStore {
         }
 
         Ok(())
+    }
+
+    pub fn set_addon_enabled(
+        &mut self,
+        space_id: &str,
+        addon_id: &str,
+        enabled: bool,
+    ) -> Result<SpaceAddonState> {
+        let space_id = space_id.trim();
+        let addon_id = addon_id.trim();
+
+        anyhow::ensure!(!space_id.is_empty(), "space_id cannot be empty");
+        anyhow::ensure!(!addon_id.is_empty(), "addon_id cannot be empty");
+
+        let space = self
+            .spaces
+            .iter_mut()
+            .find(|space| space.space_id == space_id)
+            .ok_or_else(|| anyhow::anyhow!("unknown space: {}", space_id))?;
+
+        let state = SpaceAddonState { enabled };
+        space.addons.insert(addon_id.to_string(), state.clone());
+        self.validate_and_repair()?;
+
+        Ok(state)
+    }
+
+    pub fn addon_state(&self, space_id: &str, addon_id: &str) -> Result<Option<SpaceAddonState>> {
+        let space_id = space_id.trim();
+        let addon_id = addon_id.trim();
+
+        anyhow::ensure!(!space_id.is_empty(), "space_id cannot be empty");
+        anyhow::ensure!(!addon_id.is_empty(), "addon_id cannot be empty");
+
+        let space = self
+            .spaces
+            .iter()
+            .find(|space| space.space_id == space_id)
+            .ok_or_else(|| anyhow::anyhow!("unknown space: {}", space_id))?;
+
+        Ok(space.addons.get(addon_id).cloned())
     }
 }
 
@@ -124,6 +166,19 @@ fn normalize_members(members: &[String]) -> Vec<String> {
     members.sort();
     members.dedup();
     members
+}
+
+fn normalize_addons(addons: &mut HashMap<String, SpaceAddonState>) -> Result<()> {
+    let mut normalized = HashMap::<String, SpaceAddonState>::new();
+
+    for (addon_id, state) in addons.drain() {
+        let addon_id = addon_id.trim().to_string();
+        anyhow::ensure!(!addon_id.is_empty(), "addon_id cannot be empty");
+        normalized.insert(addon_id, state);
+    }
+
+    *addons = normalized;
+    Ok(())
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -244,5 +299,63 @@ mod tests {
         };
 
         assert!(store.validate_and_repair().is_err());
+    }
+
+    #[test]
+    fn set_addon_enabled_records_space_desired_state() {
+        let mut store = SpaceStore {
+            spaces: vec![SpaceRecord {
+                space_id: "office".to_string(),
+                name: "Office".to_string(),
+                kind: SpaceKind::Group,
+                members: Vec::new(),
+                addons: HashMap::new(),
+            }],
+        };
+
+        let state = store
+            .set_addon_enabled("office", "clipboard", true)
+            .unwrap();
+
+        assert!(state.enabled);
+        assert_eq!(
+            store.addon_state("office", "clipboard").unwrap(),
+            Some(SpaceAddonState { enabled: true })
+        );
+    }
+
+    #[test]
+    fn addon_ids_are_trimmed_when_repaired() {
+        let mut addons = HashMap::new();
+        addons.insert(" clipboard ".to_string(), SpaceAddonState { enabled: true });
+
+        let mut store = SpaceStore {
+            spaces: vec![SpaceRecord {
+                space_id: "office".to_string(),
+                name: "Office".to_string(),
+                kind: SpaceKind::Group,
+                members: Vec::new(),
+                addons,
+            }],
+        };
+
+        store.validate_and_repair().unwrap();
+
+        assert!(store.spaces[0].addons.contains_key("clipboard"));
+    }
+
+    #[test]
+    fn empty_addon_ids_are_rejected() {
+        let mut store = SpaceStore {
+            spaces: vec![SpaceRecord {
+                space_id: "office".to_string(),
+                name: "Office".to_string(),
+                kind: SpaceKind::Group,
+                members: Vec::new(),
+                addons: HashMap::new(),
+            }],
+        };
+
+        assert!(store.set_addon_enabled("office", " ", true).is_err());
     }
 }
