@@ -1,3 +1,3 @@
 # Redesign progress
 
-This document tracks staged implementation of the LocalLink redesign.
+Implemented so far: architecture contract, startup preferences, persistent spaces, and space-aware transport payloads.
