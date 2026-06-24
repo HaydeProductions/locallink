@@ -114,6 +114,7 @@ async fn main() -> Result<()> {
     let connections = Arc::new(Mutex::new(HashMap::<String, ConnectedPeer>::new()));
     let events = Arc::new(Mutex::new(EventStore::default()));
     let addons = Arc::new(Mutex::new(Vec::<AddonRecord>::from(loaded_addons)));
+    let spaces = Arc::new(Mutex::new(loaded_spaces));
 
     let cfg_server = cfg.clone();
     let opts_server = opts.clone();
@@ -135,6 +136,7 @@ async fn main() -> Result<()> {
     let connections_api = connections.clone();
     let events_api = events.clone();
     let addons_api = addons.clone();
+    let spaces_api = spaces.clone();
     let connecting_api = connecting.clone();
     let opts_api = opts.clone();
 
@@ -145,6 +147,7 @@ async fn main() -> Result<()> {
             connections_api,
             events_api,
             addons_api,
+            spaces_api,
             connecting_api,
             opts_api,
             cfg_api,
