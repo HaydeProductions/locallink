@@ -6,13 +6,13 @@ mod discovery;
 mod protocol;
 mod transport;
 
-use addons::{load_addon_manifests, AddonRecord};
+use addons::AddonRecord;
 use anyhow::Result;
+use config::core_state::load_core_runtime_state;
 use config::{
     acquire_single_instance_lock, config_path, generate_psk_b64, init_app_dirs,
     load_or_create_config, save_config, validate_psk_b64,
 };
-use discovery::Peer;
 use std::collections::{HashMap, HashSet};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -21,7 +21,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration, Instant};
-use transport::{tcp_server, ConnectedPeer, ConnectionRegistry, EventStore, RunOptions};
+use transport::{tcp_server, ConnectionRegistry, RunOptions};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -74,14 +74,18 @@ async fn main() -> Result<()> {
     };
 
     let cfg = load_or_create_config()?;
-    let loaded_addons = load_addon_manifests()?;
+    let loaded_addons = addons::load_addon_manifests()?;
+    let loaded_addon_count = loaded_addons.len();
+    let runtime_state = load_core_runtime_state(loaded_addons)?;
+    let loaded_space_count = runtime_state.spaces.lock().await.spaces.len();
 
     println!("LocalLink core prototype");
     println!("Version:     {}", env!("CARGO_PKG_VERSION"));
     println!("Device name: {}", cfg.device_name);
     println!("Device ID:   {}", cfg.device_id);
     println!("Config:      {}", config_path()?.display());
-    println!("Addons:      {}", loaded_addons.len());
+    println!("Addons:      {}", loaded_addon_count);
+    println!("Spaces:      {}", loaded_space_count);
 
     if cfg.psk_b64.is_none() {
         println!();
@@ -105,16 +109,10 @@ async fn main() -> Result<()> {
 
     println!();
 
-    let peers = Arc::new(Mutex::new(HashMap::<String, Peer>::new()));
-    let connecting = Arc::new(Mutex::new(HashSet::<String>::new()));
-    let connections = Arc::new(Mutex::new(HashMap::<String, ConnectedPeer>::new()));
-    let events = Arc::new(Mutex::new(EventStore::default()));
-    let addons = Arc::new(Mutex::new(Vec::<AddonRecord>::from(loaded_addons)));
-
     let cfg_server = cfg.clone();
     let opts_server = opts.clone();
-    let connections_server = connections.clone();
-    let events_server = events.clone();
+    let connections_server = runtime_state.connections.clone();
+    let events_server = runtime_state.events.clone();
 
     tokio::spawn(async move {
         if let Err(err) =
@@ -124,14 +122,17 @@ async fn main() -> Result<()> {
         }
     });
 
-    start_addon_process_manager(addons.clone(), connections.clone());
+    start_addon_process_manager(
+        runtime_state.addons.clone(),
+        runtime_state.connections.clone(),
+    );
 
     let cfg_api = cfg.clone();
-    let peers_api = peers.clone();
-    let connections_api = connections.clone();
-    let events_api = events.clone();
-    let addons_api = addons.clone();
-    let connecting_api = connecting.clone();
+    let peers_api = runtime_state.peers.clone();
+    let connections_api = runtime_state.connections.clone();
+    let events_api = runtime_state.events.clone();
+    let addons_api = runtime_state.addons.clone();
+    let connecting_api = runtime_state.connecting.clone();
     let opts_api = opts.clone();
 
     tokio::spawn(async move {
@@ -152,7 +153,15 @@ async fn main() -> Result<()> {
         }
     });
 
-    discovery::discovery_loop(cfg, opts, peers, connecting, connections, events).await
+    discovery::discovery_loop(
+        cfg,
+        opts,
+        runtime_state.peers.clone(),
+        runtime_state.connecting.clone(),
+        runtime_state.connections.clone(),
+        runtime_state.events.clone(),
+    )
+    .await
 }
 
 fn start_addon_process_manager(
