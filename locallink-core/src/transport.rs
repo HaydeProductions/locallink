@@ -1,11 +1,10 @@
 use crate::config::{psk_bytes, register_device_id_for_macs, Config};
 use crate::protocol::{
     read_frame, write_frame, AuthChallenge, AuthResponse, ChannelClose, ChannelData, ChannelOpen,
-    HelloPayload, ServiceData, SpaceServiceData, APP_NAME, FRAME_AUTH_CHALLENGE,
-    FRAME_AUTH_RESPONSE, FRAME_BENCH_DATA, FRAME_BENCH_END, FRAME_BENCH_START,
-    FRAME_CHANNEL_CLOSE, FRAME_CHANNEL_DATA, FRAME_CHANNEL_OPEN, FRAME_ENCRYPTED, FRAME_HELLO,
-    FRAME_PING, FRAME_PONG, FRAME_SERVICE_DATA, FRAME_SPACE_SERVICE_DATA, PROTOCOL_VERSION,
-    TCP_PORT,
+    HelloPayload, ServiceData, APP_NAME, FRAME_AUTH_CHALLENGE, FRAME_AUTH_RESPONSE,
+    FRAME_BENCH_DATA, FRAME_BENCH_END, FRAME_BENCH_START, FRAME_CHANNEL_CLOSE, FRAME_CHANNEL_DATA,
+    FRAME_CHANNEL_OPEN, FRAME_ENCRYPTED, FRAME_HELLO, FRAME_PING, FRAME_PONG, FRAME_SERVICE_DATA,
+    PROTOCOL_VERSION, TCP_PORT,
 };
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -438,7 +437,7 @@ pub async fn send_space_service_message(
         .decode(data_b64)
         .context("data_b64 was not valid base64")?;
 
-    let message = SpaceServiceData {
+    let message = crate::protocol::SpaceServiceData {
         space_id: space_id.to_string(),
         service: service.to_string(),
         message_id: Uuid::new_v4().to_string(),
@@ -447,7 +446,13 @@ pub async fn send_space_service_message(
     };
 
     let payload = serde_json::to_vec(&message)?;
-    send_encrypted_payload(connections, peer_id, FRAME_SPACE_SERVICE_DATA, &payload).await?;
+    send_encrypted_payload(
+        connections,
+        peer_id,
+        crate::protocol::FRAME_SPACE_SERVICE_DATA,
+        &payload,
+    )
+    .await?;
 
     Ok(message.message_id)
 }
@@ -888,8 +893,8 @@ async fn handle_post_auth_frame(
             .await;
         }
 
-        FRAME_SPACE_SERVICE_DATA => {
-            let msg: SpaceServiceData = serde_json::from_slice(&payload)?;
+        crate::protocol::FRAME_SPACE_SERVICE_DATA => {
+            let msg: crate::protocol::SpaceServiceData = serde_json::from_slice(&payload)?;
             println!(
                 "Space service message from {peer_name} space={} service={} message_id={}",
                 msg.space_id, msg.service, msg.message_id
