@@ -5,6 +5,8 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -36,6 +38,12 @@ pub struct SpaceRecord {
 pub struct SpaceStore {
     #[serde(default)]
     pub spaces: Vec<SpaceRecord>,
+}
+
+pub type SpaceRegistry = Arc<Mutex<SpaceStore>>;
+
+pub fn new_space_registry(store: SpaceStore) -> SpaceRegistry {
+    Arc::new(Mutex::new(store))
 }
 
 impl SpaceStore {
