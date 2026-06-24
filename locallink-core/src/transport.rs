@@ -1,10 +1,11 @@
 use crate::config::{psk_bytes, register_device_id_for_macs, Config};
 use crate::protocol::{
     read_frame, write_frame, AuthChallenge, AuthResponse, ChannelClose, ChannelData, ChannelOpen,
-    HelloPayload, ServiceData, APP_NAME, FRAME_AUTH_CHALLENGE, FRAME_AUTH_RESPONSE,
-    FRAME_BENCH_DATA, FRAME_BENCH_END, FRAME_BENCH_START, FRAME_CHANNEL_CLOSE, FRAME_CHANNEL_DATA,
-    FRAME_CHANNEL_OPEN, FRAME_ENCRYPTED, FRAME_HELLO, FRAME_PING, FRAME_PONG, FRAME_SERVICE_DATA,
-    PROTOCOL_VERSION, TCP_PORT,
+    HelloPayload, ServiceData, SpaceServiceData, APP_NAME, FRAME_AUTH_CHALLENGE,
+    FRAME_AUTH_RESPONSE, FRAME_BENCH_DATA, FRAME_BENCH_END, FRAME_BENCH_START,
+    FRAME_CHANNEL_CLOSE, FRAME_CHANNEL_DATA, FRAME_CHANNEL_OPEN, FRAME_ENCRYPTED, FRAME_HELLO,
+    FRAME_PING, FRAME_PONG, FRAME_SERVICE_DATA, FRAME_SPACE_SERVICE_DATA, PROTOCOL_VERSION,
+    TCP_PORT,
 };
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -64,6 +65,12 @@ pub struct ApiEvent {
     pub peer_id: String,
     pub peer_name: String,
     pub service: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub space_id: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_peer_id: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channel_id: Option<String>,
@@ -415,6 +422,32 @@ pub async fn send_service_message(
 
     let payload = serde_json::to_vec(&message)?;
     send_encrypted_payload(connections, peer_id, FRAME_SERVICE_DATA, &payload).await?;
+
+    Ok(message.message_id)
+}
+
+pub async fn send_space_service_message(
+    connections: ConnectionRegistry,
+    peer_id: &str,
+    space_id: &str,
+    service: &str,
+    target_peer_id: Option<String>,
+    data_b64: &str,
+) -> Result<String> {
+    STANDARD
+        .decode(data_b64)
+        .context("data_b64 was not valid base64")?;
+
+    let message = SpaceServiceData {
+        space_id: space_id.to_string(),
+        service: service.to_string(),
+        message_id: Uuid::new_v4().to_string(),
+        target_peer_id,
+        data_b64: data_b64.to_string(),
+    };
+
+    let payload = serde_json::to_vec(&message)?;
+    send_encrypted_payload(connections, peer_id, FRAME_SPACE_SERVICE_DATA, &payload).await?;
 
     Ok(message.message_id)
 }
@@ -843,6 +876,34 @@ async fn handle_post_auth_frame(
                     peer_id: peer_device_id.to_string(),
                     peer_name: peer_name.to_string(),
                     service: msg.service,
+                    space_id: None,
+                    target_peer_id: None,
+                    channel_id: None,
+                    message_id: Some(msg.message_id),
+                    data_b64: Some(msg.data_b64),
+                    reason: None,
+                    received_ms: now_ms(),
+                },
+            )
+            .await;
+        }
+
+        FRAME_SPACE_SERVICE_DATA => {
+            let msg: SpaceServiceData = serde_json::from_slice(&payload)?;
+            println!(
+                "Space service message from {peer_name} space={} service={} message_id={}",
+                msg.space_id, msg.service, msg.message_id
+            );
+
+            push_event(
+                events,
+                ApiEvent {
+                    kind: "space_service_data".to_string(),
+                    peer_id: peer_device_id.to_string(),
+                    peer_name: peer_name.to_string(),
+                    service: msg.service,
+                    space_id: Some(msg.space_id),
+                    target_peer_id: msg.target_peer_id,
                     channel_id: None,
                     message_id: Some(msg.message_id),
                     data_b64: Some(msg.data_b64),
@@ -867,6 +928,8 @@ async fn handle_post_auth_frame(
                     peer_id: peer_device_id.to_string(),
                     peer_name: peer_name.to_string(),
                     service: msg.service,
+                    space_id: None,
+                    target_peer_id: None,
                     channel_id: Some(msg.channel_id),
                     message_id: None,
                     data_b64: None,
@@ -887,6 +950,8 @@ async fn handle_post_auth_frame(
                     peer_id: peer_device_id.to_string(),
                     peer_name: peer_name.to_string(),
                     service: msg.service,
+                    space_id: None,
+                    target_peer_id: None,
                     channel_id: Some(msg.channel_id),
                     message_id: Some(msg.message_id),
                     data_b64: Some(msg.data_b64),
@@ -911,6 +976,8 @@ async fn handle_post_auth_frame(
                     peer_id: peer_device_id.to_string(),
                     peer_name: peer_name.to_string(),
                     service: msg.service,
+                    space_id: None,
+                    target_peer_id: None,
                     channel_id: Some(msg.channel_id),
                     message_id: Some(msg.message_id),
                     data_b64: None,
@@ -982,34 +1049,20 @@ fn start_heartbeat(
     });
 }
 
-pub async fn run_benchmark(
+async fn run_benchmark(
     writer: Arc<Mutex<OwnedWriteHalf>>,
     crypto: SessionCrypto,
     send_seq: Arc<Mutex<u64>>,
 ) -> Result<()> {
-    println!("Starting encrypted outbound benchmark for 10 seconds...");
-
-    let payload = vec![0u8; 1024 * 1024];
-    let start = Instant::now();
-    let mut bytes_sent: u64 = 0;
-
     write_secure_frame(&writer, &crypto, &send_seq, FRAME_BENCH_START, &[]).await?;
 
-    while start.elapsed() < Duration::from_secs(10) {
-        write_secure_frame(&writer, &crypto, &send_seq, FRAME_BENCH_DATA, &payload).await?;
-        bytes_sent += payload.len() as u64;
+    let chunk = vec![0u8; 64 * 1024];
+    let end_at = Instant::now() + Duration::from_secs(3);
+
+    while Instant::now() < end_at {
+        write_secure_frame(&writer, &crypto, &send_seq, FRAME_BENCH_DATA, &chunk).await?;
     }
 
     write_secure_frame(&writer, &crypto, &send_seq, FRAME_BENCH_END, &[]).await?;
-
-    let elapsed = start.elapsed().as_secs_f64();
-    let mb_s = (bytes_sent as f64 / 1_048_576.0) / elapsed;
-    let mbit_s = (bytes_sent as f64 * 8.0 / 1_000_000.0) / elapsed;
-
-    println!(
-        "Encrypted benchmark sent: {:.2} MB/s, {:.2} Mbit/s",
-        mb_s, mbit_s
-    );
-
     Ok(())
 }
