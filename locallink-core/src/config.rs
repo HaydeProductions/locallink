@@ -8,6 +8,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+#[path = "spaces.rs"]
+pub mod spaces;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub device_id: String,
