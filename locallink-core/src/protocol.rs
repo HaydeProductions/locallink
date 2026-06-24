@@ -73,10 +73,8 @@ pub struct SpaceServiceData {
     pub space_id: String,
     pub service: String,
     pub message_id: String,
-
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_peer_id: Option<String>,
-
     pub data_b64: String,
 }
 
