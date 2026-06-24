@@ -1,7 +1,8 @@
 use crate::addons::AddonRecord;
-use crate::config::spaces::{new_space_registry, SpaceRegistry, SpaceStore};
+use crate::config::spaces::{load_or_create_space_store, new_space_registry, SpaceRegistry, SpaceStore};
 use crate::discovery::Peer;
 use crate::transport::{ConnectedPeer, ConnectionRegistry, EventQueue, EventStore};
+use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -31,6 +32,11 @@ impl CoreRuntimeState {
             spaces: new_space_registry(spaces),
         }
     }
+}
+
+pub fn load_core_runtime_state(addons: Vec<AddonRecord>) -> Result<CoreRuntimeState> {
+    let spaces = load_or_create_space_store()?;
+    Ok(CoreRuntimeState::new(addons, spaces))
 }
 
 #[cfg(test)]
