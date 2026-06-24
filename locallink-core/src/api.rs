@@ -6,18 +6,9 @@ use crate::config::{
 };
 use crate::discovery::Peer;
 use crate::transport::{
-    close_channel,
-    connect_to_peer,
-    disconnect_peer,
-    open_channel,
-    send_channel_data,
-    send_service_message,
-    send_space_service_message,
-    take_events,
-    ApiEvent,
-    ConnectionRegistry,
-    EventQueue,
-    RunOptions,
+    close_channel, connect_to_peer, disconnect_peer, open_channel, send_channel_data,
+    send_service_message, send_space_service_message, take_events, ApiEvent, ConnectionRegistry,
+    EventQueue, RunOptions,
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
