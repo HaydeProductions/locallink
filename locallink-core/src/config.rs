@@ -86,6 +86,7 @@ pub struct AppPaths {
     pub config_file: String,
     pub trusted_peers_file: String,
     pub trusted_devices_file: String,
+    pub spaces_file: String,
     pub addons_dir: String,
     pub logs_dir: String,
     pub runtime_dir: String,
@@ -108,6 +109,10 @@ pub fn trusted_peers_path() -> Result<PathBuf> {
 
 pub fn trusted_devices_path() -> Result<PathBuf> {
     Ok(app_dir()?.join("trusted-devices.json"))
+}
+
+pub fn spaces_path() -> Result<PathBuf> {
+    Ok(app_dir()?.join("spaces.json"))
 }
 
 pub fn addons_dir() -> Result<PathBuf> {
@@ -136,6 +141,7 @@ pub fn app_paths() -> Result<AppPaths> {
         config_file: config_path()?.display().to_string(),
         trusted_peers_file: trusted_peers_path()?.display().to_string(),
         trusted_devices_file: trusted_devices_path()?.display().to_string(),
+        spaces_file: spaces_path()?.display().to_string(),
         addons_dir: addons_dir()?.display().to_string(),
         logs_dir: logs_dir()?.display().to_string(),
         runtime_dir: runtime_dir()?.display().to_string(),
@@ -159,6 +165,11 @@ pub fn init_app_dirs() -> Result<()> {
     let trusted_devices = trusted_devices_path()?;
     if !trusted_devices.exists() {
         atomic_write(&trusted_devices, b"[]\n")?;
+    }
+
+    let spaces = spaces_path()?;
+    if !spaces.exists() {
+        atomic_write(&spaces, b"{\n  \"spaces\": []\n}\n")?;
     }
 
     Ok(())
