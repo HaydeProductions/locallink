@@ -8,6 +8,12 @@ Phase 1 is an architecture and configuration foundation only.
 
 It may add documentation and backend-safe configuration fields. It should not redesign the current widget-style UI, rename executables, or move add-on/runtime ownership in this step.
 
+## Phase 2 scope
+
+Phase 2 adds the persistent backend space model only.
+
+It may add `spaces.json`, Rust model types, load/save helpers, and validation. It should not add visible UI changes, space APIs, protocol frames, group routing, or add-on runtime migration yet.
+
 ## UI preservation rule
 
 The current UI style should be preserved during the redesign. Backend changes should be preferred over visible UI changes. When a UI change becomes necessary in later phases, it should fit the current visual language rather than replacing it.
@@ -110,6 +116,46 @@ Defaults:
 ```
 
 If the config is manually edited so both are false, Core repairs the preferences back to the defaults. Tray failure should not permanently disable Tray; a future launcher should open UI for that run and explain the failure.
+
+## Persistent spaces store
+
+Spaces live in `%APPDATA%\\LocalLink\\spaces.json`.
+
+Initial structure:
+
+```json
+{
+  "spaces": [
+    {
+      "space_id": "desktop-space-id",
+      "name": "Desktop",
+      "kind": "direct",
+      "members": ["desktop-device-id"],
+      "addons": {
+        "clipboard": { "enabled": true }
+      }
+    },
+    {
+      "space_id": "office-space-id",
+      "name": "Office",
+      "kind": "group",
+      "members": ["desktop-device-id", "laptop-device-id"],
+      "addons": {
+        "clipboard": { "enabled": true },
+        "file-transfer": { "enabled": false }
+      }
+    }
+  ]
+}
+```
+
+Validation rules:
+
+- `space_id` must be present and unique.
+- empty names are repaired to the `space_id`.
+- members are trimmed, sorted, and deduplicated.
+- direct spaces may contain at most one member.
+- group spaces may contain multiple members.
 
 ## Core connection model direction
 
