@@ -14,7 +14,7 @@ use config::{
     load_or_create_config, save_config, validate_psk_b64,
 };
 use discovery::Peer;
-use spaces::load_or_create_space_store;
+use spaces::{load_or_create_space_store, SpaceKind, SpaceStore};
 use std::collections::{HashMap, HashSet};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -130,7 +130,7 @@ async fn main() -> Result<()> {
         }
     });
 
-    start_addon_process_manager(addons.clone(), connections.clone());
+    start_space_addon_process_manager(addons.clone(), spaces.clone(), connections.clone());
 
     let cfg_api = cfg.clone();
     let peers_api = peers.clone();
@@ -171,86 +171,118 @@ async fn main() -> Result<()> {
     }
 }
 
-fn start_addon_process_manager(
+#[derive(Clone)]
+struct WantedSpaceAddon {
+    key: String,
+    addon: AddonRecord,
+    space_id: String,
+    space_kind: SpaceKind,
+    space_name: String,
+}
+
+fn start_space_addon_process_manager(
     addons: Arc<Mutex<Vec<AddonRecord>>>,
+    spaces: Arc<Mutex<SpaceStore>>,
     connections: ConnectionRegistry,
 ) {
     tokio::spawn(async move {
         let mut children = HashMap::<String, Child>::new();
-        let mut suppressed_until_next_connection = HashSet::<String>::new();
-        let mut had_connections = false;
+        let mut suppressed_until_next_activation = HashSet::<String>::new();
 
         loop {
-            let has_connections = !connections.lock().await.is_empty();
-
-            if !has_connections {
-                if had_connections || !children.is_empty() {
-                    stop_all_addon_children(&mut children);
-                    eprintln!("Stopped add-ons because there are no active connections");
-                }
-
-                suppressed_until_next_connection.clear();
-                had_connections = false;
-                sleep(Duration::from_millis(250)).await;
-                continue;
-            }
-
-            if !had_connections {
-                suppressed_until_next_connection.clear();
-            }
-            had_connections = true;
-
-            let addon_snapshot = addons.lock().await.clone();
-
-            let wanted: HashMap<String, AddonRecord> = addon_snapshot
-                .into_iter()
-                .filter(|addon| addon.enabled)
+            let addon_snapshot: HashMap<String, AddonRecord> = addons
+                .lock()
+                .await
+                .iter()
+                .cloned()
                 .map(|addon| (addon.id.clone(), addon))
                 .collect();
+            let space_snapshot = spaces.lock().await.clone();
+            let connected_peer_ids: HashSet<String> = connections.lock().await.keys().cloned().collect();
+            let mut wanted = HashMap::<String, WantedSpaceAddon>::new();
 
-            suppressed_until_next_connection.retain(|id| wanted.contains_key(id));
+            for space in space_snapshot.spaces {
+                let active = space
+                    .members
+                    .iter()
+                    .any(|member| connected_peer_ids.contains(member));
 
-            let running_ids: Vec<String> = children.keys().cloned().collect();
+                if !active {
+                    continue;
+                }
 
-            for id in running_ids {
+                for (addon_id, state) in &space.addons {
+                    if !state.enabled {
+                        continue;
+                    }
+
+                    let Some(addon) = addon_snapshot.get(addon_id).cloned() else {
+                        eprintln!(
+                            "Space {} wants missing add-on {}; skipping",
+                            space.space_id, addon_id
+                        );
+                        continue;
+                    };
+
+                    let key = format!("{}:{}", space.space_id, addon.id);
+                    wanted.insert(
+                        key.clone(),
+                        WantedSpaceAddon {
+                            key,
+                            addon,
+                            space_id: space.space_id.clone(),
+                            space_kind: space.kind.clone(),
+                            space_name: space.name.clone(),
+                        },
+                    );
+                }
+            }
+
+            suppressed_until_next_activation.retain(|key| wanted.contains_key(key));
+
+            let running_keys: Vec<String> = children.keys().cloned().collect();
+            for key in running_keys {
                 let exited = children
-                    .get_mut(&id)
+                    .get_mut(&key)
                     .and_then(|child| child.try_wait().ok())
                     .is_some();
 
                 if exited {
-                    children.remove(&id);
-                    suppressed_until_next_connection.insert(id.clone());
+                    children.remove(&key);
+                    suppressed_until_next_activation.insert(key.clone());
                     eprintln!(
-                        "Add-on process exited: {id}. It will not be restarted until the next connection cycle."
+                        "Space add-on process exited: {key}. It will not restart until the space deactivates and reactivates."
                     );
                     continue;
                 }
 
-                if !wanted.contains_key(&id) {
-                    if let Some(mut child) = children.remove(&id) {
+                if !wanted.contains_key(&key) {
+                    if let Some(mut child) = children.remove(&key) {
                         let _ = child.kill();
                         let _ = child.wait();
-                        eprintln!("Stopped add-on: {id}");
+                        eprintln!("Stopped space add-on: {key}");
                     }
                 }
             }
 
-            for (id, addon) in wanted {
-                if children.contains_key(&id) || suppressed_until_next_connection.contains(&id) {
+            for (key, wanted_addon) in wanted {
+                if children.contains_key(&key) || suppressed_until_next_activation.contains(&key) {
                     continue;
                 }
 
-                match launch_core_owned_addon(&addon) {
+                match launch_space_owned_addon(&wanted_addon) {
                     Ok(child) => {
-                        eprintln!("Started add-on: {}", addon.name);
-                        children.insert(id, child);
+                        eprintln!(
+                            "Started add-on {} for space {}",
+                            wanted_addon.addon.name, wanted_addon.space_name
+                        );
+                        children.insert(key, child);
                     }
                     Err(err) => {
-                        suppressed_until_next_connection.insert(id);
+                        suppressed_until_next_activation.insert(key.clone());
                         eprintln!(
-                            "Could not start add-on {}: {err}. It will not be retried until the next connection cycle.",
-                            addon.name
+                            "Could not start add-on {} for space {}: {err}. It will not be retried until the space deactivates and reactivates.",
+                            wanted_addon.addon.name, wanted_addon.space_name
                         );
                     }
                 }
@@ -261,24 +293,27 @@ fn start_addon_process_manager(
     });
 }
 
-fn stop_all_addon_children(children: &mut HashMap<String, Child>) {
-    for (id, mut child) in children.drain() {
-        let _ = child.kill();
-        let _ = child.wait();
-        eprintln!("Stopped add-on: {id}");
-    }
-}
-
-fn launch_core_owned_addon(addon: &AddonRecord) -> Result<Child> {
-    let exe_path = Path::new(&addon.addon_dir).join(&addon.executable);
+fn launch_space_owned_addon(wanted: &WantedSpaceAddon) -> Result<Child> {
+    let exe_path = Path::new(&wanted.addon.addon_dir).join(&wanted.addon.executable);
 
     if !exe_path.exists() {
         anyhow::bail!("add-on executable not found: {}", exe_path.display());
     }
 
+    let space_kind = match &wanted.space_kind {
+        SpaceKind::Direct => "direct",
+        SpaceKind::Group => "group",
+    };
+
     let mut command = Command::new(&exe_path);
     command
-        .current_dir(Path::new(&addon.addon_dir))
+        .current_dir(Path::new(&wanted.addon.addon_dir))
+        .env("LOCALLINK_SPACE_ID", &wanted.space_id)
+        .env("LOCALLINK_SPACE_KIND", space_kind)
+        .env("LOCALLINK_SPACE_NAME", &wanted.space_name)
+        .env("LOCALLINK_CORE_API_ADDR", api::LOCAL_API_ADDR)
+        .env("LOCALLINK_ADDON_ID", &wanted.addon.id)
+        .env("LOCALLINK_ADDON_INSTANCE_ID", &wanted.key)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
