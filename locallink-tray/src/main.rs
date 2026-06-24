@@ -7,6 +7,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::thread;
+use std::time::Duration;
 
 const LOCAL_API_ADDR: &str = "127.0.0.1:47900";
 const TRAY_ICON_B64: &str = include_str!("../../assets/locallink-tray.ico.b64");
@@ -44,7 +46,9 @@ unsafe fn windows_tray_main() -> Result<()> {
     const TRAY_UID: u32 = 1;
     const WM_TRAYICON: u32 = WM_APP + 1;
     const MENU_OPEN: usize = 1001;
-    const MENU_EXIT: usize = 1002;
+    const MENU_START_CORE: usize = 1002;
+    const MENU_STOP_CORE: usize = 1003;
+    const MENU_EXIT: usize = 1004;
 
     extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         unsafe {
@@ -69,9 +73,16 @@ unsafe fn windows_tray_main() -> Result<()> {
                         let _ = launch_or_focus_ui();
                         return 0;
                     }
+                    MENU_START_CORE => {
+                        let _ = ensure_core_running();
+                        return 0;
+                    }
+                    MENU_STOP_CORE => {
+                        let _ = shutdown_core_via_api();
+                        return 0;
+                    }
                     MENU_EXIT => {
                         let _ = shutdown_core_via_api();
-                        kill_local_processes_for_exit();
                         remove_tray_icon(hwnd);
                         PostQuitMessage(0);
                         return 0;
@@ -124,8 +135,13 @@ unsafe fn windows_tray_main() -> Result<()> {
             }
 
             let open = wide_null("Open LocalLink");
-            let exit = wide_null("Exit");
+            let start_core = wide_null("Start Core");
+            let stop_core = wide_null("Stop Core");
+            let exit = wide_null("Exit Tray");
             AppendMenuW(menu, MF_STRING, MENU_OPEN, open.as_ptr());
+            AppendMenuW(menu, MF_SEPARATOR, 0, null());
+            AppendMenuW(menu, MF_STRING, MENU_START_CORE, start_core.as_ptr());
+            AppendMenuW(menu, MF_STRING, MENU_STOP_CORE, stop_core.as_ptr());
             AppendMenuW(menu, MF_SEPARATOR, 0, null());
             AppendMenuW(menu, MF_STRING, MENU_EXIT, exit.as_ptr());
 
@@ -307,6 +323,35 @@ fn sibling_exe(name: &str) -> Result<PathBuf> {
 }
 
 #[cfg(target_os = "windows")]
+fn ensure_core_running() -> Result<()> {
+    if api_request(json!({ "cmd": "status" })).is_ok() {
+        return Ok(());
+    }
+
+    let core = sibling_exe("LocalLinkCore.exe").or_else(|_| sibling_exe("locallink-core.exe"))?;
+    let dir = core
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("could not determine LocalLink Core folder"))?;
+
+    Command::new(&core)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("launching LocalLink Core")?;
+
+    for _ in 0..12 {
+        thread::sleep(Duration::from_millis(250));
+        if api_request(json!({ "cmd": "status" })).is_ok() {
+            return Ok(());
+        }
+    }
+
+    bail!("LocalLink Core was launched but did not become ready")
+}
+
+#[cfg(target_os = "windows")]
 fn shutdown_core_via_api() -> Result<()> {
     api_request(json!({ "cmd": "shutdown" })).map(|_| ())
 }
@@ -330,23 +375,4 @@ fn api_request(req: serde_json::Value) -> Result<serde_json::Value> {
     }
 
     Ok(serde_json::from_str(&response)?)
-}
-
-#[cfg(target_os = "windows")]
-fn kill_local_processes_for_exit() {
-    let names = [
-        "LocalLink.exe",
-        "locallink-addon-clipboard.exe",
-        "locallink-core.exe",
-    ];
-
-    for name in names {
-        let _ = Command::new("taskkill.exe")
-            .args(["/F", "/T", "/IM", name])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .and_then(|mut child| child.wait());
-    }
 }
