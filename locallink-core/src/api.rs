@@ -7,7 +7,8 @@ use crate::config::{
 use crate::discovery::Peer;
 use crate::transport::{
     close_channel, connect_to_peer, disconnect_peer, open_channel, send_channel_data,
-    send_service_message, take_events, ApiEvent, ConnectionRegistry, EventQueue, RunOptions,
+    send_service_message, send_space_service_message, take_events, ApiEvent, ConnectionRegistry,
+    EventQueue, RunOptions,
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -499,7 +500,15 @@ async fn handle_request(
             let mut deliveries = Vec::new();
 
             for peer_id in peer_ids {
-                match send_service_message(connections.clone(), &peer_id, &service, &data_b64).await
+                match send_space_service_message(
+                    connections.clone(),
+                    &peer_id,
+                    &space_id,
+                    &service,
+                    target_peer_id.clone(),
+                    &data_b64,
+                )
+                .await
                 {
                     Ok(message_id) => deliveries.push(SpaceSendPeerResult {
                         peer_id,
