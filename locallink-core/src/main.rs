@@ -163,7 +163,14 @@ async fn main() -> Result<()> {
     });
 
     tokio::select! {
-        result = discovery::discovery_loop(cfg, opts, peers, connecting, connections, events) => result,
+        result = discovery::discovery_loop(
+            cfg,
+            opts,
+            peers,
+            connecting,
+            connections,
+            events,
+        ) => result,
         _ = shutdown_rx.recv() => {
             println!("LocalLink Core shutdown requested");
             Ok(())
@@ -198,7 +205,12 @@ fn start_space_addon_process_manager(
                 .map(|addon| (addon.id.clone(), addon))
                 .collect();
             let space_snapshot = spaces.lock().await.clone();
-            let connected_peer_ids: HashSet<String> = connections.lock().await.keys().cloned().collect();
+            let connected_peer_ids: HashSet<String> = connections
+                .lock()
+                .await
+                .keys()
+                .cloned()
+                .collect();
             let mut wanted = HashMap::<String, WantedSpaceAddon>::new();
 
             for space in space_snapshot.spaces {
@@ -266,7 +278,9 @@ fn start_space_addon_process_manager(
             }
 
             for (key, wanted_addon) in wanted {
-                if children.contains_key(&key) || suppressed_until_next_activation.contains(&key) {
+                if children.contains_key(&key)
+                    || suppressed_until_next_activation.contains(&key)
+                {
                     continue;
                 }
 
