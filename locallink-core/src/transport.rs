@@ -1049,20 +1049,34 @@ fn start_heartbeat(
     });
 }
 
-async fn run_benchmark(
+pub async fn run_benchmark(
     writer: Arc<Mutex<OwnedWriteHalf>>,
     crypto: SessionCrypto,
     send_seq: Arc<Mutex<u64>>,
 ) -> Result<()> {
+    println!("Starting encrypted outbound benchmark for 10 seconds...");
+
+    let payload = vec![0u8; 1024 * 1024];
+    let start = Instant::now();
+    let mut bytes_sent: u64 = 0;
+
     write_secure_frame(&writer, &crypto, &send_seq, FRAME_BENCH_START, &[]).await?;
 
-    let chunk = vec![0u8; 64 * 1024];
-    let end_at = Instant::now() + Duration::from_secs(3);
-
-    while Instant::now() < end_at {
-        write_secure_frame(&writer, &crypto, &send_seq, FRAME_BENCH_DATA, &chunk).await?;
+    while start.elapsed() < Duration::from_secs(10) {
+        write_secure_frame(&writer, &crypto, &send_seq, FRAME_BENCH_DATA, &payload).await?;
+        bytes_sent += payload.len() as u64;
     }
 
     write_secure_frame(&writer, &crypto, &send_seq, FRAME_BENCH_END, &[]).await?;
+
+    let elapsed = start.elapsed().as_secs_f64();
+    let mb_s = (bytes_sent as f64 / 1_048_576.0) / elapsed;
+    let mbit_s = (bytes_sent as f64 * 8.0 / 1_000_000.0) / elapsed;
+
+    println!(
+        "Encrypted benchmark sent: {:.2} MB/s, {:.2} Mbit/s",
+        mb_s, mbit_s
+    );
+
     Ok(())
 }
