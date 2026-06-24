@@ -25,6 +25,7 @@ pub const FRAME_SERVICE_DATA: u8 = 10;
 pub const FRAME_CHANNEL_OPEN: u8 = 11;
 pub const FRAME_CHANNEL_DATA: u8 = 12;
 pub const FRAME_CHANNEL_CLOSE: u8 = 13;
+pub const FRAME_SPACE_SERVICE_DATA: u8 = 14;
 
 pub const MAX_FRAME_PAYLOAD: usize = 8 * 1024 * 1024 + 1024;
 
@@ -64,6 +65,18 @@ pub struct AuthResponse {
 pub struct ServiceData {
     pub service: String,
     pub message_id: String,
+    pub data_b64: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpaceServiceData {
+    pub space_id: String,
+    pub service: String,
+    pub message_id: String,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_peer_id: Option<String>,
+
     pub data_b64: String,
 }
 
