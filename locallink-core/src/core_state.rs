@@ -1,5 +1,7 @@
 use crate::addons::AddonRecord;
-use crate::config::spaces::{load_or_create_space_store, new_space_registry, SpaceRegistry, SpaceStore};
+use crate::config::spaces::{
+    load_or_create_space_store, new_space_registry, SpaceRegistry, SpaceStore,
+};
 use crate::discovery::Peer;
 use crate::transport::{ConnectedPeer, ConnectionRegistry, EventQueue, EventStore};
 use anyhow::Result;
