@@ -14,6 +14,12 @@ Phase 2 adds the persistent backend space model only.
 
 It may add `spaces.json`, Rust model types, load/save helpers, and validation. It should not add visible UI changes, space APIs, protocol frames, group routing, or add-on runtime migration yet.
 
+## Phase 3 scope
+
+Phase 3 starts wiring the persistent space model into Core runtime state.
+
+It may add a shared Core runtime state container, a shared spaces registry, and startup loading/validation of `spaces.json`. It should not add visible UI changes, user-facing space management, group routing, new protocol frames, or add-on runtime migration yet.
+
 ## UI preservation rule
 
 The current UI style should be preserved during the redesign. Backend changes should be preferred over visible UI changes. When a UI change becomes necessary in later phases, it should fit the current visual language rather than replacing it.
@@ -156,6 +162,22 @@ Validation rules:
 - members are trimmed, sorted, and deduplicated.
 - direct spaces may contain at most one member.
 - group spaces may contain multiple members.
+
+## Core runtime state direction
+
+Core runtime state should collect the backend-owned registries that the local API and runtime tasks need to share:
+
+```text
+CoreRuntimeState
+  peers
+  connecting
+  connections / peer sessions
+  events
+  addons
+  spaces
+```
+
+The spaces registry is a shared in-memory wrapper around the persistent `SpaceStore`. Runtime tasks should use the shared registry instead of re-reading `spaces.json` independently.
 
 ## Core connection model direction
 
