@@ -11,6 +11,9 @@ use uuid::Uuid;
 #[path = "spaces.rs"]
 pub mod spaces;
 
+#[path = "core_state.rs"]
+pub mod core_state;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub device_id: String,
@@ -205,6 +208,7 @@ pub fn acquire_single_instance_lock() -> Result<File> {
 
 pub fn load_or_create_config() -> Result<Config> {
     init_app_dirs()?;
+    let _spaces = spaces::load_or_create_space_store()?;
 
     let path = config_path()?;
 
