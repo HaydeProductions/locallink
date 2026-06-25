@@ -66,6 +66,15 @@ enum ApiJob {
         space_id: String,
         peer_id: String,
     },
+    AcceptSpaceInvite {
+        space_id: String,
+    },
+    DeclineSpaceInvite {
+        space_id: String,
+    },
+    LeaveSpace {
+        space_id: String,
+    },
     PollEvents {
         service: Option<String>,
     },
@@ -165,6 +174,17 @@ struct SpaceRow {
     active: bool,
     members: Vec<String>,
     addon_count: usize,
+    role: String,
+    owner_device_id: String,
+    local_state: String,
+    can_accept_invite: bool,
+    can_decline_invite: bool,
+    can_connect: bool,
+    can_disconnect: bool,
+    can_leave: bool,
+    can_invite_members: bool,
+    can_remove_members: bool,
+    can_manage_addons: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -425,6 +445,20 @@ impl LocalLinkUi {
                 self.log("Space member removed.");
                 self.send_job(ApiJob::Spaces);
             }
+            "accept_space_invite" => {
+                self.log("Space invite accepted.");
+                self.send_job(ApiJob::Spaces);
+                self.send_job(ApiJob::Addons);
+            }
+            "decline_space_invite" => {
+                self.log("Space invite declined.");
+                self.send_job(ApiJob::Spaces);
+            }
+            "leave_space" => {
+                self.log("Left space.");
+                self.send_job(ApiJob::Spaces);
+                self.send_job(ApiJob::Addons);
+            }
             _ => {}
         }
     }
@@ -546,6 +580,17 @@ impl LocalLinkUi {
                     active: bool_field(row, "active"),
                     members: string_array_field(row, "members"),
                     addon_count,
+                    role: str_field(row, "role"),
+                    owner_device_id: str_field(row, "owner_device_id"),
+                    local_state: str_field(row, "local_state"),
+                    can_accept_invite: bool_field(row, "can_accept_invite"),
+                    can_decline_invite: bool_field(row, "can_decline_invite"),
+                    can_connect: bool_field(row, "can_connect"),
+                    can_disconnect: bool_field(row, "can_disconnect"),
+                    can_leave: bool_field(row, "can_leave"),
+                    can_invite_members: bool_field(row, "can_invite_members"),
+                    can_remove_members: bool_field(row, "can_remove_members"),
+                    can_manage_addons: bool_field(row, "can_manage_addons"),
                 });
             }
         }
@@ -1542,6 +1587,18 @@ fn api_worker(rx: mpsc::Receiver<ApiJob>, tx: mpsc::Sender<UiMsg>) {
                 "space_id": space_id,
                 "peer_id": peer_id
             }),
+            ApiJob::AcceptSpaceInvite { space_id } => json!({
+                "cmd": "accept_space_invite",
+                "space_id": space_id
+            }),
+            ApiJob::DeclineSpaceInvite { space_id } => json!({
+                "cmd": "decline_space_invite",
+                "space_id": space_id
+            }),
+            ApiJob::LeaveSpace { space_id } => json!({
+                "cmd": "leave_space",
+                "space_id": space_id
+            }),
             ApiJob::Shutdown => json!({ "cmd": "shutdown" }),
             ApiJob::PollEvents { service } => {
                 let mut req = json!({
@@ -1623,6 +1680,9 @@ fn job_name(job: &ApiJob) -> &'static str {
         ApiJob::DeactivateSpace { .. } => "deactivate_space",
         ApiJob::AddSpaceMember { .. } => "add_space_member",
         ApiJob::RemoveSpaceMember { .. } => "remove_space_member",
+        ApiJob::AcceptSpaceInvite { .. } => "accept_space_invite",
+        ApiJob::DeclineSpaceInvite { .. } => "decline_space_invite",
+        ApiJob::LeaveSpace { .. } => "leave_space",
         ApiJob::PollEvents { .. } => "poll_events",
         ApiJob::AddTrusted { .. } => "add_trusted",
         ApiJob::RemoveTrusted { .. } => "remove_trusted",
