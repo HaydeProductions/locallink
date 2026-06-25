@@ -40,6 +40,16 @@ pub struct SpaceStore {
     pub spaces: Vec<SpaceRecord>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SpaceActivationState {
+    pub space_id: String,
+    pub name: String,
+    pub kind: SpaceKind,
+    pub active: bool,
+    pub connected_members: Vec<String>,
+    pub missing_members: Vec<String>,
+}
+
 pub type SpaceRegistry = Arc<Mutex<SpaceStore>>;
 
 pub fn new_space_registry(store: SpaceStore) -> SpaceRegistry {
@@ -120,6 +130,33 @@ impl SpaceStore {
 
         Ok(space.addons.get(addon_id).cloned())
     }
+
+    pub fn activation_state(
+        &self,
+        space_id: &str,
+        connected_peer_ids: &HashSet<String>,
+    ) -> Result<SpaceActivationState> {
+        let space_id = space_id.trim();
+        anyhow::ensure!(!space_id.is_empty(), "space_id cannot be empty");
+
+        let space = self
+            .spaces
+            .iter()
+            .find(|space| space.space_id == space_id)
+            .ok_or_else(|| anyhow::anyhow!("unknown space: {}", space_id))?;
+
+        Ok(space_activation_state(space, connected_peer_ids))
+    }
+
+    pub fn activation_states(
+        &self,
+        connected_peer_ids: &HashSet<String>,
+    ) -> Vec<SpaceActivationState> {
+        self.spaces
+            .iter()
+            .map(|space| space_activation_state(space, connected_peer_ids))
+            .collect()
+    }
 }
 
 pub fn load_or_create_space_store() -> Result<SpaceStore> {
@@ -154,6 +191,36 @@ pub fn save_space_store(store: &SpaceStore) -> Result<()> {
     atomic_write(&spaces_path()?, text.as_bytes())?;
 
     Ok(())
+}
+
+fn space_activation_state(
+    space: &SpaceRecord,
+    connected_peer_ids: &HashSet<String>,
+) -> SpaceActivationState {
+    let mut connected_members = Vec::new();
+    let mut missing_members = Vec::new();
+
+    for member in &space.members {
+        if connected_peer_ids.contains(member) {
+            connected_members.push(member.clone());
+        } else {
+            missing_members.push(member.clone());
+        }
+    }
+
+    let active = match space.kind {
+        SpaceKind::Direct => space.members.len() == 1 && connected_members.len() == 1,
+        SpaceKind::Group => !connected_members.is_empty(),
+    };
+
+    SpaceActivationState {
+        space_id: space.space_id.clone(),
+        name: space.name.clone(),
+        kind: space.kind.clone(),
+        active,
+        connected_members,
+        missing_members,
+    }
 }
 
 fn normalize_members(members: &[String]) -> Vec<String> {
@@ -357,5 +424,88 @@ mod tests {
         };
 
         assert!(store.set_addon_enabled("office", " ", true).is_err());
+    }
+
+    #[test]
+    fn direct_space_is_active_only_when_its_member_is_connected() {
+        let store = SpaceStore {
+            spaces: vec![SpaceRecord {
+                space_id: "desktop".to_string(),
+                name: "Desktop".to_string(),
+                kind: SpaceKind::Direct,
+                members: vec!["desktop-peer".to_string()],
+                addons: HashMap::new(),
+            }],
+        };
+        let connected = HashSet::from(["desktop-peer".to_string()]);
+
+        let state = store.activation_state("desktop", &connected).unwrap();
+
+        assert!(state.active);
+        assert_eq!(state.connected_members, vec!["desktop-peer".to_string()]);
+        assert!(state.missing_members.is_empty());
+    }
+
+    #[test]
+    fn direct_space_is_inactive_when_its_member_is_missing() {
+        let store = SpaceStore {
+            spaces: vec![SpaceRecord {
+                space_id: "desktop".to_string(),
+                name: "Desktop".to_string(),
+                kind: SpaceKind::Direct,
+                members: vec!["desktop-peer".to_string()],
+                addons: HashMap::new(),
+            }],
+        };
+        let connected = HashSet::new();
+
+        let state = store.activation_state("desktop", &connected).unwrap();
+
+        assert!(!state.active);
+        assert!(state.connected_members.is_empty());
+        assert_eq!(state.missing_members, vec!["desktop-peer".to_string()]);
+    }
+
+    #[test]
+    fn group_space_stays_active_with_partial_members_connected() {
+        let store = SpaceStore {
+            spaces: vec![SpaceRecord {
+                space_id: "office".to_string(),
+                name: "Office".to_string(),
+                kind: SpaceKind::Group,
+                members: vec!["desktop-peer".to_string(), "laptop-peer".to_string()],
+                addons: HashMap::new(),
+            }],
+        };
+        let connected = HashSet::from(["desktop-peer".to_string()]);
+
+        let state = store.activation_state("office", &connected).unwrap();
+
+        assert!(state.active);
+        assert_eq!(state.connected_members, vec!["desktop-peer".to_string()]);
+        assert_eq!(state.missing_members, vec!["laptop-peer".to_string()]);
+    }
+
+    #[test]
+    fn group_space_is_inactive_when_no_members_are_connected() {
+        let store = SpaceStore {
+            spaces: vec![SpaceRecord {
+                space_id: "office".to_string(),
+                name: "Office".to_string(),
+                kind: SpaceKind::Group,
+                members: vec!["desktop-peer".to_string(), "laptop-peer".to_string()],
+                addons: HashMap::new(),
+            }],
+        };
+        let connected = HashSet::new();
+
+        let state = store.activation_state("office", &connected).unwrap();
+
+        assert!(!state.active);
+        assert!(state.connected_members.is_empty());
+        assert_eq!(
+            state.missing_members,
+            vec!["desktop-peer".to_string(), "laptop-peer".to_string()]
+        );
     }
 }
