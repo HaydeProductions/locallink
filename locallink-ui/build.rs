@@ -35,7 +35,7 @@ fn main() {
     generated = must_replace(
         generated,
         "    Addons,\n    PollEvents {",
-        "    Addons,\n    Spaces,\n    PollEvents {",
+        "    Addons,\n    Spaces,\n    CreateSpace {\n        name: String,\n        kind: String,\n    },\n    AddSpaceMember {\n        space_id: String,\n        peer_id: String,\n    },\n    RemoveSpaceMember {\n        space_id: String,\n        peer_id: String,\n    },\n    PollEvents {",
     );
 
     generated = must_replace(
@@ -52,8 +52,20 @@ fn main() {
 
     generated = must_replace(
         generated,
+        "    add_name: String,\n    add_mac: String,\n    event_filter: String,",
+        "    add_name: String,\n    add_mac: String,\n    event_filter: String,\n    space_name: String,\n    space_kind_group: bool,\n    space_member_peer_id: String,",
+    );
+
+    generated = must_replace(
+        generated,
         "            addons: Vec::new(),\n            events: Vec::new(),",
         "            addons: Vec::new(),\n            spaces: Vec::new(),\n            events: Vec::new(),",
+    );
+
+    generated = must_replace(
+        generated,
+        "            add_name: String::new(),\n            add_mac: String::new(),\n            event_filter: String::new(),",
+        "            add_name: String::new(),\n            add_mac: String::new(),\n            event_filter: String::new(),\n            space_name: String::new(),\n            space_kind_group: false,\n            space_member_peer_id: String::new(),",
     );
 
     generated = must_replace(
@@ -83,6 +95,12 @@ fn main() {
     generated = generated.replace(
         "                self.send_job(ApiJob::Connections);\n                self.send_job(ApiJob::Addons);",
         "                self.send_job(ApiJob::Connections);\n                self.send_job(ApiJob::Spaces);\n                self.send_job(ApiJob::Addons);",
+    );
+
+    generated = must_replace(
+        generated,
+        "            \"shutdown\" => {\n                self.status = None;\n                self.log(\"Core shutdown requested.\");\n            }",
+        "            \"shutdown\" => {\n                self.status = None;\n                self.log(\"Core shutdown requested.\");\n            }\n            \"create_space\" => {\n                self.log(\"Space created.\");\n                self.space_name.clear();\n                self.send_job(ApiJob::Spaces);\n            }\n            \"add_space_member\" => {\n                self.log(\"Space member added.\");\n                self.space_member_peer_id.clear();\n                self.send_job(ApiJob::Spaces);\n            }\n            \"remove_space_member\" => {\n                self.log(\"Space member removed.\");\n                self.send_job(ApiJob::Spaces);\n            }",
     );
 
     generated = must_replace(
@@ -118,13 +136,13 @@ fn main() {
     generated = must_replace(
         generated,
         "            ApiJob::Connections => json!({ \"cmd\": \"list_connections\" }),\n            ApiJob::Addons => json!({ \"cmd\": \"list_addons\" }),",
-        "            ApiJob::Connections => json!({ \"cmd\": \"list_connections\" }),\n            ApiJob::Addons => json!({ \"cmd\": \"list_addons\" }),\n            ApiJob::Spaces => json!({ \"cmd\": \"list_spaces\" }),",
+        "            ApiJob::Connections => json!({ \"cmd\": \"list_connections\" }),\n            ApiJob::Addons => json!({ \"cmd\": \"list_addons\" }),\n            ApiJob::Spaces => json!({ \"cmd\": \"list_spaces\" }),\n            ApiJob::CreateSpace { name, kind } => json!({\n                \"cmd\": \"create_space\",\n                \"name\": name,\n                \"kind\": kind\n            }),\n            ApiJob::AddSpaceMember { space_id, peer_id } => json!({\n                \"cmd\": \"add_space_member\",\n                \"space_id\": space_id,\n                \"peer_id\": peer_id\n            }),\n            ApiJob::RemoveSpaceMember { space_id, peer_id } => json!({\n                \"cmd\": \"remove_space_member\",\n                \"space_id\": space_id,\n                \"peer_id\": peer_id\n            }),",
     );
 
     generated = must_replace(
         generated,
         "        ApiJob::Connections => \"connections\",\n        ApiJob::Addons => \"addons\",",
-        "        ApiJob::Connections => \"connections\",\n        ApiJob::Addons => \"addons\",\n        ApiJob::Spaces => \"spaces\",",
+        "        ApiJob::Connections => \"connections\",\n        ApiJob::Addons => \"addons\",\n        ApiJob::Spaces => \"spaces\",\n        ApiJob::CreateSpace { .. } => \"create_space\",\n        ApiJob::AddSpaceMember { .. } => \"add_space_member\",\n        ApiJob::RemoveSpaceMember { .. } => \"remove_space_member\",",
     );
 
     generated = must_replace(
@@ -246,11 +264,61 @@ impl LocalLinkUi {
             return;
         }
 
+        glass_panel(ui, |ui| {
+            ui.heading(egui::RichText::new("Create space").color(color_text()));
+            ui.label(
+                egui::RichText::new("Create a direct or group connection space owned by Core.")
+                    .color(color_muted()),
+            );
+
+            ui.add_space(8.0);
+
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Name");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.space_name)
+                        .desired_width(170.0)
+                        .hint_text("Gaming PC space"),
+                );
+            });
+
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Kind");
+                let mut direct = !self.space_kind_group;
+                let mut group = self.space_kind_group;
+
+                if ui.radio_value(&mut direct, true, "Direct").clicked() {
+                    self.space_kind_group = false;
+                }
+                if ui.radio_value(&mut group, true, "Group").clicked() {
+                    self.space_kind_group = true;
+                }
+            });
+
+            ui.add_space(8.0);
+
+            if ui
+                .add(primary_button("Create Space"))
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
+                let name = self.space_name.trim().to_string();
+                if name.is_empty() {
+                    self.log("Space name is required.");
+                } else {
+                    let kind = if self.space_kind_group { "group" } else { "direct" }.to_string();
+                    self.send_job(ApiJob::CreateSpace { name, kind });
+                }
+            }
+        });
+
+        ui.add_space(14.0);
+
         if self.spaces.is_empty() {
             notice(
                 ui,
                 "No spaces yet",
-                "Spaces can be created from the Core API. UI create/member controls are next.",
+                "Create a space above, then add trusted peer IDs as members.",
                 color_warning(),
             );
             return;
@@ -330,16 +398,65 @@ impl LocalLinkUi {
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
-                                        state_chip(ui, "Read-only", color_muted());
+                                        state_chip(ui, "Configured", color_muted());
                                     },
                                 );
                             });
                         });
 
-                    if !space.members.is_empty() {
-                        ui.add_space(10.0);
-                        mono_line(ui, "Members", &ellipsize(&space.members.join(", "), 80));
-                    }
+                    ui.add_space(10.0);
+
+                    glass_panel(ui, |ui| {
+                        ui.heading(egui::RichText::new("Members").color(color_text()).size(16.0));
+
+                        if space.members.is_empty() {
+                            ui.label(egui::RichText::new("No members yet.").color(color_muted()));
+                        } else {
+                            for member in &space.members {
+                                ui.horizontal_wrapped(|ui| {
+                                    mono_line(ui, "Peer", &ellipsize(member, 42));
+
+                                    if ui
+                                        .add(danger_button("Remove"))
+                                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                        .clicked()
+                                    {
+                                        self.send_job(ApiJob::RemoveSpaceMember {
+                                            space_id: space.id.clone(),
+                                            peer_id: member.clone(),
+                                        });
+                                    }
+                                });
+                            }
+                        }
+
+                        ui.separator();
+
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Peer ID");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.space_member_peer_id)
+                                    .desired_width(210.0)
+                                    .hint_text("trusted device id"),
+                            );
+
+                            if ui
+                                .add(primary_button("Add Member"))
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                .clicked()
+                            {
+                                let peer_id = self.space_member_peer_id.trim().to_string();
+                                if peer_id.is_empty() {
+                                    self.log("Peer ID is required.");
+                                } else {
+                                    self.send_job(ApiJob::AddSpaceMember {
+                                        space_id: space.id.clone(),
+                                        peer_id,
+                                    });
+                                }
+                            }
+                        });
+                    });
 
                     if self.show_advanced {
                         ui.separator();
