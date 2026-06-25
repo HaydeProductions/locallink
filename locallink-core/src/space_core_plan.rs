@@ -1,7 +1,9 @@
-use crate::config::core_state::CoreRuntimeState;
-use crate::config::space_instances::space_instance_state::SharedSpaceAddonInstances;
-use crate::config::space_runtime::SpaceAddonSyncPlan;
-use crate::config::space_sync::plan_space_addon_delta_from_state;
+use crate::config::{
+    core_state::CoreRuntimeState,
+    space_instances::space_instance_state::SharedSpaceAddonInstances,
+    space_runtime::SpaceAddonSyncPlan,
+    space_sync::plan_space_addon_delta_from_state,
+};
 use std::collections::HashSet;
 
 pub async fn plan_space_addons_for_core_state(
