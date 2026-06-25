@@ -19,6 +19,10 @@ fn main() {
         "use std::process::{Child, Command, Stdio};\n",
         "use std::process::{Child, Command, Stdio};\n#[cfg(target_os = \"windows\")]\nuse std::os::windows::process::CommandExt;\n",
     );
+    generated = generated.replace(
+        "use std::process::{Command, Stdio};\n",
+        "use std::process::{Command, Stdio};\n#[cfg(target_os = \"windows\")]\nuse std::os::windows::process::CommandExt;\n",
+    );
 
     generated = generated.replace("use std::sync::mpsc;\n", "use std::sync::{mpsc, Arc};\n");
 
@@ -69,14 +73,12 @@ fn main() {
         "    let mut command = Command::new(core);\n    command\n        .current_dir(dir)\n        .stdin(Stdio::null())\n        .stdout(Stdio::null())\n        .stderr(Stdio::null());\n\n    #[cfg(target_os = \"windows\")]\n    command.creation_flags(0x08000000); // CREATE_NO_WINDOW\n\n    command.spawn()?;",
     );
 
-    generated = must_replace(
-        generated,
+    generated = generated.replace(
         "        self.reconcile_addon_processes();\n",
         "        // The UI only displays add-on state. Add-on processes are owned by the core/connection layer, not the UI.\n",
     );
 
-    generated = must_replace(
-        generated,
+    generated = generated.replace(
         "        if enabled {\n            match launch_addon(&addon_snapshot) {\n                Ok(child) => {\n                    self.addon_processes\n                        .insert(addon_snapshot.id.clone(), child);\n                    self.log(format!(\"Enabled {}\", addon_snapshot.name));\n                }\n                Err(e) => self.log(format!(\n                    \"{} was enabled but could not be launched: {e}\",\n                    addon_snapshot.name\n                )),\n            }\n        } else if let Some(mut child) = self.addon_processes.remove(&addon_snapshot.id) {\n            let _ = child.kill();\n            self.log(format!(\"Disabled {}\", addon_snapshot.name));\n        } else {\n            self.log(format!(\"Disabled {}\", addon_snapshot.name));\n        }\n\n        self.send_job(ApiJob::ReloadAddons);",
         "        if enabled {\n            self.log(format!(\"Enabled {}\", addon_snapshot.name));\n        } else {\n            self.log(format!(\"Disabled {}\", addon_snapshot.name));\n        }\n\n        self.send_job(ApiJob::ReloadAddons);",
     );

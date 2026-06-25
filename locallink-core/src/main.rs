@@ -1,3 +1,10 @@
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_assignments)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::unnecessary_sort_by)]
+#![allow(clippy::suspicious_open_options)]
+
 mod addons;
 mod api;
 mod api_client;
