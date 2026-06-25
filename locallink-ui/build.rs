@@ -245,6 +245,36 @@ fn must_replace(input: String, from: &str, to: &str) -> String {
 const SPACES_UI_CODE: &str = r#"
 
 impl LocalLinkUi {
+    fn space_member_candidates(&self) -> Vec<(String, String, String)> {
+        let mut candidates = Vec::<(String, String, String)>::new();
+
+        for connection in &self.connections {
+            let id = connection.device_id.clone();
+            if !id.trim().is_empty() && !candidates.iter().any(|(existing, _, _)| existing == &id) {
+                candidates.push((id, connection.device_name.clone(), "Connected".to_string()));
+            }
+        }
+
+        for peer in &self.peers {
+            let id = peer.device_id.clone();
+            if !id.trim().is_empty() && !candidates.iter().any(|(existing, _, _)| existing == &id) {
+                let source = if peer.trusted { "Nearby trusted" } else { "Nearby" };
+                candidates.push((id, peer.device_name.clone(), source.to_string()));
+            }
+        }
+
+        for trusted in &self.trusted {
+            if let Some(device_id) = &trusted.device_id {
+                let id = device_id.clone();
+                if !id.trim().is_empty() && !candidates.iter().any(|(existing, _, _)| existing == &id) {
+                    candidates.push((id, trusted.name.clone(), "Trusted".to_string()));
+                }
+            }
+        }
+
+        candidates
+    }
+
     fn screen_spaces(&mut self, ui: &mut egui::Ui) {
         page_title(
             ui,
@@ -318,11 +348,13 @@ impl LocalLinkUi {
             notice(
                 ui,
                 "No spaces yet",
-                "Create a space above, then add trusted peer IDs as members.",
+                "Create a space above, then add a discovered or trusted device as a member.",
                 color_warning(),
             );
             return;
         }
+
+        let device_candidates = self.space_member_candidates();
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             for space in self.spaces.clone() {
@@ -432,12 +464,50 @@ impl LocalLinkUi {
 
                         ui.separator();
 
+                        if device_candidates.is_empty() {
+                            ui.label(
+                                egui::RichText::new(
+                                    "No discovered, connected, or trusted device IDs available yet. Open Discover/Devices or connect a peer first.",
+                                )
+                                .color(color_muted()),
+                            );
+                        } else {
+                            ui.label(egui::RichText::new("Pick a device").color(color_text()).strong());
+                            ui.add_space(4.0);
+
+                            for (peer_id, label, source) in &device_candidates {
+                                let already_member = space.members.iter().any(|member| member == peer_id);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.vertical(|ui| {
+                                        ui.label(egui::RichText::new(label).color(color_text()).strong());
+                                        ui.label(
+                                            egui::RichText::new(format!("{} · {}", source, ellipsize(peer_id, 28)))
+                                                .color(color_muted())
+                                                .size(12.5),
+                                        );
+                                    });
+
+                                    if already_member {
+                                        state_chip(ui, "Already member", color_success());
+                                    } else if ui
+                                        .add(primary_button("Use this device"))
+                                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                        .clicked()
+                                    {
+                                        self.space_member_peer_id = peer_id.clone();
+                                    }
+                                });
+                            }
+
+                            ui.separator();
+                        }
+
                         ui.horizontal_wrapped(|ui| {
                             ui.label("Peer ID");
                             ui.add(
                                 egui::TextEdit::singleline(&mut self.space_member_peer_id)
                                     .desired_width(210.0)
-                                    .hint_text("trusted device id"),
+                                    .hint_text("auto-filled from device picker"),
                             );
 
                             if ui
@@ -447,7 +517,7 @@ impl LocalLinkUi {
                             {
                                 let peer_id = self.space_member_peer_id.trim().to_string();
                                 if peer_id.is_empty() {
-                                    self.log("Peer ID is required.");
+                                    self.log("Pick a device or enter a Peer ID first.");
                                 } else {
                                     self.send_job(ApiJob::AddSpaceMember {
                                         space_id: space.id.clone(),
