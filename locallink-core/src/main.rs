@@ -164,6 +164,7 @@ async fn main() -> Result<()> {
         runtime_state.connecting.clone(),
         runtime_state.connections.clone(),
         runtime_state.events.clone(),
+        runtime_state.spaces.clone(),
     )
     .await
 }
@@ -174,12 +175,11 @@ fn start_addon_process_manager(state: CoreRuntimeState) {
         let mut suppressed_until_space_change = HashSet::<String>::new();
 
         loop {
-            let action_plan =
-                config::space_sync::plan_space_addon_actions_from_core_state(
-                    &state,
-                    api::LOCAL_API_ADDR,
-                )
-                .await;
+            let action_plan = config::space_sync::plan_space_addon_actions_from_core_state(
+                &state,
+                api::LOCAL_API_ADDR,
+            )
+            .await;
 
             let wanted: HashSet<String> = action_plan
                 .start
@@ -199,11 +199,7 @@ fn start_addon_process_manager(state: CoreRuntimeState) {
                     eprintln!("Stopped add-on: {id}");
                 }
 
-                state
-                    .space_addon_instances
-                    .lock()
-                    .await
-                    .mark_absent(&id);
+                state.space_addon_instances.lock().await.mark_absent(&id);
             }
 
             let running_ids: Vec<String> = children.keys().cloned().collect();
@@ -219,11 +215,7 @@ fn start_addon_process_manager(state: CoreRuntimeState) {
                 if exited {
                     children.remove(&id);
                     suppressed_until_space_change.insert(id.clone());
-                    state
-                        .space_addon_instances
-                        .lock()
-                        .await
-                        .mark_absent(&id);
+                    state.space_addon_instances.lock().await.mark_absent(&id);
 
                     eprintln!(
                         "Add-on process exited: {id}. It will not be restarted until its space state changes."
@@ -236,11 +228,7 @@ fn start_addon_process_manager(state: CoreRuntimeState) {
                         let _ = child.kill();
                         let _ = child.wait();
 
-                        state
-                            .space_addon_instances
-                            .lock()
-                            .await
-                            .mark_absent(&id);
+                        state.space_addon_instances.lock().await.mark_absent(&id);
 
                         eprintln!("Stopped add-on: {id}");
                     }
@@ -249,26 +237,16 @@ fn start_addon_process_manager(state: CoreRuntimeState) {
 
             for id in action_plan.keep {
                 if children.contains_key(&id) {
-                    state
-                        .space_addon_instances
-                        .lock()
-                        .await
-                        .mark_present(id);
+                    state.space_addon_instances.lock().await.mark_present(id);
                 } else {
-                    state
-                        .space_addon_instances
-                        .lock()
-                        .await
-                        .mark_absent(&id);
+                    state.space_addon_instances.lock().await.mark_absent(&id);
                 }
             }
 
             for context in action_plan.start {
                 let id = context.instance_id.clone();
 
-                if children.contains_key(&id)
-                    || suppressed_until_space_change.contains(&id)
-                {
+                if children.contains_key(&id) || suppressed_until_space_change.contains(&id) {
                     continue;
                 }
 
@@ -285,11 +263,7 @@ fn start_addon_process_manager(state: CoreRuntimeState) {
                         children.insert(id, child);
                     }
                     Err(err) => {
-                        state
-                            .space_addon_instances
-                            .lock()
-                            .await
-                            .mark_absent(&id);
+                        state.space_addon_instances.lock().await.mark_absent(&id);
 
                         suppressed_until_space_change.insert(id.clone());
 

@@ -100,7 +100,7 @@ fn main() {
     generated = must_replace(
         generated,
         "            \"shutdown\" => {\n                self.status = None;\n                self.log(\"Core shutdown requested.\");\n            }",
-        "            \"shutdown\" => {\n                self.status = None;\n                self.log(\"Core shutdown requested.\");\n            }\n            \"create_space\" => {\n                self.log(\"Space created.\");\n                self.space_name.clear();\n                self.send_job(ApiJob::Spaces);\n            }\n            \"activate_space\" => {\n                self.log(\"Space connected.\");\n                self.send_job(ApiJob::Spaces);\n                self.send_job(ApiJob::Addons);\n            }\n            \"deactivate_space\" => {\n                self.log(\"Space disconnected.\");\n                self.send_job(ApiJob::Spaces);\n                self.send_job(ApiJob::Addons);\n            }\n            \"add_space_member\" => {\n                self.log(\"Space member added.\");\n                self.space_member_peer_id.clear();\n                self.send_job(ApiJob::Spaces);\n            }\n            \"remove_space_member\" => {\n                self.log(\"Space member removed.\");\n                self.send_job(ApiJob::Spaces);\n            }",
+        "            \"shutdown\" => {\n                self.status = None;\n                self.log(\"Core shutdown requested.\");\n            }\n            \"create_space\" => {\n                self.log(\"Space created.\");\n                self.space_name.clear();\n                self.send_job(ApiJob::Spaces);\n            }\n            \"activate_space\" => {\n                self.log(\"Space connected.\");\n                self.send_job(ApiJob::Spaces);\n                self.send_job(ApiJob::Addons);\n            }\n            \"deactivate_space\" => {\n                self.log(\"Space disconnected.\");\n                self.send_job(ApiJob::Spaces);\n                self.send_job(ApiJob::Addons);\n            }\n            \"add_space_member\" => {\n                self.log(\"Space invite sent.\");\n                self.space_member_peer_id.clear();\n                self.send_job(ApiJob::Spaces);\n            }\n            \"remove_space_member\" => {\n                self.log(\"Space member removed.\");\n                self.send_job(ApiJob::Spaces);\n            }",
     );
 
     generated = must_replace(
@@ -348,7 +348,7 @@ impl LocalLinkUi {
             notice(
                 ui,
                 "No spaces yet",
-                "Create a space above, then add a discovered or trusted device as a member.",
+                "Create a space above, then send an invite to a discovered or trusted device.",
                 color_warning(),
             );
             return;
@@ -477,7 +477,7 @@ impl LocalLinkUi {
                         ui.heading(egui::RichText::new("Members").color(color_text()).size(16.0));
 
                         if space.members.is_empty() {
-                            ui.label(egui::RichText::new("No members yet.").color(color_muted()));
+                            ui.label(egui::RichText::new("No accepted members yet.").color(color_muted()));
                         } else {
                             for member in &space.members {
                                 ui.horizontal_wrapped(|ui| {
@@ -507,7 +507,7 @@ impl LocalLinkUi {
                                 .color(color_muted()),
                             );
                         } else {
-                            ui.label(egui::RichText::new("Pick a device").color(color_text()).strong());
+                            ui.label(egui::RichText::new("Pick a device to invite").color(color_text()).strong());
                             ui.add_space(4.0);
 
                             for (peer_id, label, source) in &device_candidates {
@@ -525,7 +525,7 @@ impl LocalLinkUi {
                                     if already_member {
                                         state_chip(ui, "Already member", color_success());
                                     } else if ui
-                                        .add(primary_button("Use this device"))
+                                        .add(primary_button("Invite this device"))
                                         .on_hover_cursor(egui::CursorIcon::PointingHand)
                                         .clicked()
                                     {
@@ -546,13 +546,13 @@ impl LocalLinkUi {
                             );
 
                             if ui
-                                .add(primary_button("Add Member"))
+                                .add(primary_button("Send Invite"))
                                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                                 .clicked()
                             {
                                 let peer_id = self.space_member_peer_id.trim().to_string();
                                 if peer_id.is_empty() {
-                                    self.log("Pick a device or enter a Peer ID first.");
+                                    self.log("Pick a device to invite or enter a Peer ID first.");
                                 } else {
                                     self.send_job(ApiJob::AddSpaceMember {
                                         space_id: space.id.clone(),
