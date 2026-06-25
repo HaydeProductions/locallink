@@ -35,6 +35,10 @@ impl SpaceAddonInstancePlan {
         env.insert("LOCALLINK_SPACE_ID".to_string(), self.space_id.clone());
         env.insert("LOCALLINK_SPACE_KIND".to_string(), space_kind_env(&self.space_kind));
         env.insert("LOCALLINK_SPACE_NAME".to_string(), self.space_name.clone());
+        env.insert(
+            "LOCALLINK_CONNECTED_MEMBERS".to_string(),
+            self.connected_members.join(","),
+        );
 
         SpaceAddonRuntimeContext {
             instance_id: self.instance_id.clone(),
@@ -223,6 +227,10 @@ mod tests {
         assert_eq!(env_value(&context, "LOCALLINK_SPACE_ID"), Some("office"));
         assert_eq!(env_value(&context, "LOCALLINK_SPACE_KIND"), Some("group"));
         assert_eq!(env_value(&context, "LOCALLINK_SPACE_NAME"), Some("Office"));
+        assert_eq!(
+            env_value(&context, "LOCALLINK_CONNECTED_MEMBERS"),
+            Some("desktop")
+        );
     }
 
     #[test]
