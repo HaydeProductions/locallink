@@ -15,6 +15,13 @@ pub struct SpaceAddonInstancePlan {
     pub connected_members: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SpaceAddonSyncPlan {
+    pub start: Vec<SpaceAddonInstancePlan>,
+    pub keep: Vec<SpaceAddonInstancePlan>,
+    pub stop: Vec<String>,
+}
+
 pub fn plan_space_addon_instances(
     store: &SpaceStore,
     addons: &[AddonRecord],
@@ -71,6 +78,37 @@ pub fn plan_space_addon_instances(
             .then(left.addon_id.cmp(&right.addon_id))
     });
     plans
+}
+
+pub fn plan_space_addon_sync(
+    desired: &[SpaceAddonInstancePlan],
+    running_instance_ids: &HashSet<String>,
+) -> SpaceAddonSyncPlan {
+    let desired_ids: HashSet<String> = desired
+        .iter()
+        .map(|plan| plan.instance_id.clone())
+        .collect();
+
+    let mut start = Vec::new();
+    let mut keep = Vec::new();
+
+    for plan in desired {
+        if running_instance_ids.contains(&plan.instance_id) {
+            keep.push(plan.clone());
+        } else {
+            start.push(plan.clone());
+        }
+    }
+
+    let mut stop: Vec<String> = running_instance_ids
+        .iter()
+        .filter(|instance_id| !desired_ids.contains(*instance_id))
+        .cloned()
+        .collect();
+
+    stop.sort();
+
+    SpaceAddonSyncPlan { start, keep, stop }
 }
 
 #[cfg(test)]
@@ -154,5 +192,47 @@ mod tests {
         let plans = plan_space_addon_instances(&store, &addons, &connected);
 
         assert!(plans.is_empty());
+    }
+
+    #[test]
+    fn sync_plan_starts_missing_instances() {
+        let store = store_with_space(SpaceKind::Group, vec!["desktop"]);
+        let addons = vec![addon("clipboard")];
+        let connected = HashSet::from(["desktop".to_string()]);
+        let desired = plan_space_addon_instances(&store, &addons, &connected);
+        let running = HashSet::new();
+
+        let sync = plan_space_addon_sync(&desired, &running);
+
+        assert_eq!(sync.start.len(), 1);
+        assert!(sync.keep.is_empty());
+        assert!(sync.stop.is_empty());
+    }
+
+    #[test]
+    fn sync_plan_keeps_matching_instances() {
+        let store = store_with_space(SpaceKind::Group, vec!["desktop"]);
+        let addons = vec![addon("clipboard")];
+        let connected = HashSet::from(["desktop".to_string()]);
+        let desired = plan_space_addon_instances(&store, &addons, &connected);
+        let running = HashSet::from(["office:clipboard".to_string()]);
+
+        let sync = plan_space_addon_sync(&desired, &running);
+
+        assert!(sync.start.is_empty());
+        assert_eq!(sync.keep.len(), 1);
+        assert!(sync.stop.is_empty());
+    }
+
+    #[test]
+    fn sync_plan_stops_orphaned_instances() {
+        let desired = Vec::new();
+        let running = HashSet::from(["office:clipboard".to_string()]);
+
+        let sync = plan_space_addon_sync(&desired, &running);
+
+        assert!(sync.start.is_empty());
+        assert!(sync.keep.is_empty());
+        assert_eq!(sync.stop, vec!["office:clipboard".to_string()]);
     }
 }
