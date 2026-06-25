@@ -2,7 +2,8 @@ use crate::addons::AddonRecord;
 use crate::config::core_state::CoreRuntimeState;
 use crate::config::space_instances::space_instance_state::apply_space_addon_sync_plan;
 use crate::config::space_runtime::{
-    plan_space_addon_instances, plan_space_addon_sync, SpaceAddonSyncPlan,
+    plan_space_addon_instances, plan_space_addon_runtime_actions, plan_space_addon_sync,
+    SpaceAddonRuntimeActionPlan, SpaceAddonSyncPlan,
 };
 use crate::config::spaces::SpaceStore;
 use std::collections::HashSet;
@@ -29,6 +30,14 @@ pub async fn plan_space_addon_delta_from_core_state(
     let current_instance_ids = state.space_addon_instances.lock().await.snapshot();
 
     plan_space_addon_delta_from_state(&spaces, &addons, &connected_peer_ids, &current_instance_ids)
+}
+
+pub async fn plan_space_addon_actions_from_core_state(
+    state: &CoreRuntimeState,
+    core_api_addr: &str,
+) -> SpaceAddonRuntimeActionPlan {
+    let sync_plan = plan_space_addon_delta_from_core_state(state).await;
+    plan_space_addon_runtime_actions(&sync_plan, core_api_addr)
 }
 
 pub async fn apply_space_addon_delta_to_core_state(
