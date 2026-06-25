@@ -1,13 +1,9 @@
 use anyhow::{bail, Context, Result};
 use eframe::egui;
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashMap;
-use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
-use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -63,7 +59,6 @@ enum ApiJob {
         mac: Option<String>,
         peer_id: Option<String>,
     },
-    ReloadAddons,
     Shutdown,
 }
 
@@ -124,21 +119,6 @@ struct ConnectionRow {
     last_seen_ms_ago: u128,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct AddonManifest {
-    id: String,
-    name: String,
-    version: String,
-    #[serde(default)]
-    description: String,
-    #[serde(default)]
-    executable: String,
-    #[serde(default)]
-    services: Vec<String>,
-    #[serde(default)]
-    enabled: bool,
-}
-
 #[derive(Debug, Clone, Default)]
 struct AddonRow {
     id: String,
@@ -178,8 +158,6 @@ struct LocalLinkUi {
     connections: Vec<ConnectionRow>,
     addons: Vec<AddonRow>,
     events: Vec<EventRow>,
-
-    addon_processes: HashMap<String, Child>,
 
     log: Vec<String>,
     loading_count: usize,
@@ -239,8 +217,6 @@ impl LocalLinkUi {
             connections: Vec::new(),
             addons: Vec::new(),
             events: Vec::new(),
-
-            addon_processes: HashMap::new(),
 
             log: Vec::new(),
             loading_count: 0,
@@ -370,10 +346,6 @@ impl LocalLinkUi {
                 self.send_job(ApiJob::Connections);
                 self.send_job(ApiJob::Addons);
             }
-            "reload_addons" => {
-                self.log("Add-ons reloaded.");
-                self.send_job(ApiJob::Addons);
-            }
             "shutdown" => {
                 self.status = None;
                 self.log("Core shutdown requested.");
@@ -479,7 +451,6 @@ impl LocalLinkUi {
             }
         }
 
-        self.reconcile_addon_processes();
     }
 
     fn apply_events(&mut self, v: Value) {
@@ -508,67 +479,6 @@ impl LocalLinkUi {
         }
     }
 
-    fn reconcile_addon_processes(&mut self) {
-        // 1. Drop processes that have exited.
-        let running_ids: Vec<String> = self.addon_processes.keys().cloned().collect();
-
-        for id in running_ids {
-            let exited = {
-                if let Some(child) = self.addon_processes.get_mut(&id) {
-                    matches!(child.try_wait(), Ok(Some(_)))
-                } else {
-                    false
-                }
-            };
-
-            if exited {
-                self.addon_processes.remove(&id);
-                self.log(format!("Add-on process exited: {id}"));
-            }
-        }
-
-        // 2. Stop processes whose manifest is now disabled or gone.
-        let running_ids: Vec<String> = self.addon_processes.keys().cloned().collect();
-
-        for id in running_ids {
-            let should_run = self
-                .addons
-                .iter()
-                .any(|addon| addon.id == id && addon.enabled);
-
-            if !should_run {
-                if let Some(mut child) = self.addon_processes.remove(&id) {
-                    let _ = child.kill();
-                    self.log(format!("Stopped disabled add-on: {id}"));
-                }
-            }
-        }
-
-        // 3. Launch enabled add-ons that are not already running.
-        let enabled_addons: Vec<AddonRow> = self
-            .addons
-            .iter()
-            .filter(|addon| addon.enabled)
-            .cloned()
-            .collect();
-
-        for addon in enabled_addons {
-            if self.addon_processes.contains_key(&addon.id) {
-                continue;
-            }
-
-            match launch_addon(&addon) {
-                Ok(child) => {
-                    self.addon_processes.insert(addon.id.clone(), child);
-                    self.log(format!("Started add-on: {}", addon.name));
-                }
-                Err(err) => {
-                    self.log(format!("Could not start add-on {}: {err}", addon.name));
-                }
-            }
-        }
-    }
-
     fn start_core(&mut self) {
         match start_sibling_core() {
             Ok(()) => {
@@ -580,43 +490,7 @@ impl LocalLinkUi {
         }
     }
 
-    fn toggle_addon(&mut self, addon_id: String, enabled: bool) {
-        let addon_snapshot = {
-            let Some(addon) = self.addons.iter_mut().find(|a| a.id == addon_id) else {
-                self.log(format!("Add-on not found: {addon_id}"));
-                return;
-            };
 
-            addon.enabled = enabled;
-            addon.clone()
-        };
-
-        if let Err(e) = set_manifest_enabled(&addon_snapshot.manifest_path, enabled) {
-            self.log(format!("Could not update {}: {e}", addon_snapshot.name));
-            return;
-        }
-
-        if enabled {
-            match launch_addon(&addon_snapshot) {
-                Ok(child) => {
-                    self.addon_processes
-                        .insert(addon_snapshot.id.clone(), child);
-                    self.log(format!("Enabled {}", addon_snapshot.name));
-                }
-                Err(e) => self.log(format!(
-                    "{} was enabled but could not be launched: {e}",
-                    addon_snapshot.name
-                )),
-            }
-        } else if let Some(mut child) = self.addon_processes.remove(&addon_snapshot.id) {
-            let _ = child.kill();
-            self.log(format!("Disabled {}", addon_snapshot.name));
-        } else {
-            self.log(format!("Disabled {}", addon_snapshot.name));
-        }
-
-        self.send_job(ApiJob::ReloadAddons);
-    }
 }
 
 impl eframe::App for LocalLinkUi {
@@ -1147,7 +1021,16 @@ impl LocalLinkUi {
         page_title(
             ui,
             "Add-ons",
-            "Switch features on when you want them active.",
+            "Installed add-ons are owned by Core and enabled per connection space.",
+        );
+
+        ui.add_space(14.0);
+
+        notice(
+            ui,
+            "Core-owned runtime",
+            "The UI no longer starts or stops add-ons directly. Per-space controls will wire into the Core API next.",
+            color_accent(),
         );
 
         ui.add_space(14.0);
@@ -1162,14 +1045,8 @@ impl LocalLinkUi {
             return;
         }
 
-        let running_ids: Vec<String> = self.addon_processes.keys().cloned().collect();
-        let mut toggle_action: Option<(String, bool)> = None;
-
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for addon in &mut self.addons {
-                let is_running = running_ids.contains(&addon.id);
-                let mut enabled = addon.enabled;
-
+            for addon in &self.addons {
                 let title = ellipsize(&format!("{} {}", addon.name, addon.version), 30);
                 let description = ellipsize(&addon.description, 82);
                 let executable = ellipsize(&addon.executable, 42);
@@ -1178,11 +1055,10 @@ impl LocalLinkUi {
                 let manifest = ellipsize(&addon.manifest_path, 54);
 
                 device_card(ui, |ui| {
-                    // Header: fixed-size text zone + state chip.
                     ui.horizontal_top(|ui| {
                         ui.vertical(|ui| {
                             ui.set_min_width(0.0);
-                            ui.set_max_width((ui.available_width() - 86.0).max(180.0));
+                            ui.set_max_width((ui.available_width() - 110.0).max(180.0));
 
                             ui.label(
                                 egui::RichText::new(title)
@@ -1201,62 +1077,33 @@ impl LocalLinkUi {
                         });
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                            if is_running {
-                                state_chip(ui, "Running", color_success());
-                            } else if addon.enabled {
-                                state_chip(ui, "Enabled", color_warning());
-                            } else {
-                                state_chip(ui, "Off", color_muted());
-                            }
+                            state_chip(ui, "Core-owned", color_accent());
                         });
                     });
 
                     ui.add_space(16.0);
 
-                    // Activation tray: stable layout, no long text expansion.
-                    let tray_fill = if enabled {
-                        color_accent_dark().linear_multiply(0.52)
-                    } else {
-                        color_panel().linear_multiply(0.82)
-                    };
-
-                    let tray_stroke = if enabled {
-                        egui::Stroke::new(1.0, color_accent().linear_multiply(0.72))
-                    } else {
-                        egui::Stroke::new(1.0, color_border().linear_multiply(0.45))
-                    };
-
                     egui::Frame::none()
-                        .fill(tray_fill)
-                        .stroke(tray_stroke)
+                        .fill(color_panel().linear_multiply(0.82))
+                        .stroke(egui::Stroke::new(1.0, color_border().linear_multiply(0.45)))
                         .rounding(egui::Rounding::same(18))
                         .inner_margin(egui::Margin::symmetric(16, 13))
                         .show(ui, |ui| {
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 ui.vertical(|ui| {
                                     ui.label(
-                                        egui::RichText::new(if enabled {
-                                            "Feature enabled"
-                                        } else {
-                                            "Feature disabled"
-                                        })
-                                        .color(if enabled {
-                                            color_success()
-                                        } else {
-                                            color_text()
-                                        })
-                                        .size(15.0)
-                                        .strong(),
+                                        egui::RichText::new("Available to spaces")
+                                            .color(color_text())
+                                            .size(15.0)
+                                            .strong(),
                                     );
 
                                     ui.add_space(2.0);
 
                                     ui.label(
-                                        egui::RichText::new(if enabled {
-                                            "Allowed to run and use LocalLink."
-                                        } else {
-                                            "Turn on to make this feature available."
-                                        })
+                                        egui::RichText::new(
+                                            "Desired state is configured per connection space.",
+                                        )
                                         .color(color_muted())
                                         .size(12.5),
                                     );
@@ -1265,9 +1112,7 @@ impl LocalLinkUi {
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
-                                        if toggle_switch(ui, &mut enabled).changed() {
-                                            toggle_action = Some((addon.id.clone(), enabled));
-                                        }
+                                        state_chip(ui, "Per-space", color_muted());
                                     },
                                 );
                             });
@@ -1280,16 +1125,17 @@ impl LocalLinkUi {
                         mono_line(ui, "Services", &services);
                         mono_line(ui, "Folder", &folder);
                         mono_line(ui, "Manifest", &manifest);
+                        mono_line(
+                            ui,
+                            "Legacy enabled flag",
+                            if addon.enabled { "true" } else { "false" },
+                        );
                     }
                 });
 
                 ui.add_space(12.0);
             }
         });
-
-        if let Some((id, enabled)) = toggle_action {
-            self.toggle_addon(id, enabled);
-        }
     }
 
     fn screen_activity(&mut self, ui: &mut egui::Ui) {
@@ -1539,8 +1385,7 @@ fn api_worker(rx: mpsc::Receiver<ApiJob>, tx: mpsc::Sender<UiMsg>) {
             ApiJob::Peers => json!({ "cmd": "list_peers" }),
             ApiJob::Trusted => json!({ "cmd": "list_trusted_devices" }),
             ApiJob::Connections => json!({ "cmd": "list_connections" }),
-            ApiJob::Addons => json!({ "cmd": "reload_addons" }),
-            ApiJob::ReloadAddons => json!({ "cmd": "reload_addons" }),
+            ApiJob::Addons => json!({ "cmd": "list_addons" }),
             ApiJob::Shutdown => json!({ "cmd": "shutdown" }),
             ApiJob::PollEvents { service } => {
                 let mut req = json!({
@@ -1621,7 +1466,6 @@ fn job_name(job: &ApiJob) -> &'static str {
         ApiJob::RemoveTrusted { .. } => "remove_trusted",
         ApiJob::Connect { .. } => "connect",
         ApiJob::Disconnect { .. } => "disconnect",
-        ApiJob::ReloadAddons => "reload_addons",
         ApiJob::Shutdown => "shutdown",
     }
 }
@@ -1980,39 +1824,6 @@ fn api_request(req: Value) -> Result<Value> {
     }
 
     Ok(value)
-}
-
-fn set_manifest_enabled(manifest_path: &str, enabled: bool) -> Result<()> {
-    let text = fs::read_to_string(manifest_path)
-        .with_context(|| format!("reading manifest {manifest_path}"))?;
-
-    let mut manifest: AddonManifest =
-        serde_json::from_str(&text).with_context(|| format!("parsing manifest {manifest_path}"))?;
-
-    manifest.enabled = enabled;
-
-    fs::write(manifest_path, serde_json::to_string_pretty(&manifest)?)
-        .with_context(|| format!("writing manifest {manifest_path}"))?;
-
-    Ok(())
-}
-
-fn launch_addon(addon: &AddonRow) -> Result<Child> {
-    let exe_path = Path::new(&addon.addon_dir).join(&addon.executable);
-
-    if !exe_path.exists() {
-        bail!("add-on executable not found: {}", exe_path.display());
-    }
-
-    let child = Command::new(&exe_path)
-        .current_dir(Path::new(&addon.addon_dir))
-        .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .with_context(|| format!("launching {}", exe_path.display()))?;
-
-    Ok(child)
 }
 
 fn start_sibling_core() -> Result<()> {
