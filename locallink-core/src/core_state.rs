@@ -1,4 +1,7 @@
 use crate::addons::AddonRecord;
+use crate::config::space_instances::space_instance_state::{
+    new_shared_space_addon_instances, SharedSpaceAddonInstances,
+};
 use crate::config::spaces::{
     load_or_create_space_store, new_space_registry, SpaceRegistry, SpaceStore,
 };
@@ -21,6 +24,7 @@ pub struct CoreRuntimeState {
     pub events: EventQueue,
     pub addons: AddonRegistry,
     pub spaces: SpaceRegistry,
+    pub space_addon_instances: SharedSpaceAddonInstances,
 }
 
 impl CoreRuntimeState {
@@ -32,6 +36,7 @@ impl CoreRuntimeState {
             events: Arc::new(Mutex::new(EventStore::default())),
             addons: Arc::new(Mutex::new(addons)),
             spaces: new_space_registry(spaces),
+            space_addon_instances: new_shared_space_addon_instances(),
         }
     }
 }
@@ -63,5 +68,6 @@ mod tests {
         assert!(state.connecting.lock().await.is_empty());
         assert!(state.connections.lock().await.is_empty());
         assert!(state.addons.lock().await.is_empty());
+        assert!(state.space_addon_instances.lock().await.is_empty());
     }
 }
