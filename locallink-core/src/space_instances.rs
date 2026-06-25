@@ -84,8 +84,7 @@ mod tests {
             space_kind: SpaceKind::Group,
             addon_id: "clipboard".to_string(),
             addon_name: "Clipboard".to_string(),
-            executable: "clipboard.exe".to_string(),
-            addon_dir: "addons/clipboard".to_string(),
+            executable: "addons/clipboard/clipboard.exe".to_string(),
             connected_members: Vec::new(),
         }
     }
