@@ -113,7 +113,7 @@ pub fn plan_space_addon_instances(
                 space_kind: space.kind.clone(),
                 addon_id: addon.id.clone(),
                 addon_name: addon.name.clone(),
-                executable: addon.executable.clone(),
+                executable: addon_executable_path(addon),
                 connected_members: activation.connected_members.clone(),
             });
         }
@@ -177,6 +177,15 @@ pub fn plan_space_addon_runtime_actions(
     SpaceAddonRuntimeActionPlan { start, keep, stop }
 }
 
+fn addon_executable_path(addon: &AddonRecord) -> String {
+    let addon_dir = addon.addon_dir.trim_end_matches(['/', '\\']);
+    if addon_dir.is_empty() {
+        addon.executable.clone()
+    } else {
+        format!("{}/{}", addon_dir, addon.executable)
+    }
+}
+
 fn space_kind_env(kind: &SpaceKind) -> String {
     match kind {
         SpaceKind::Direct => "direct".to_string(),
@@ -232,6 +241,7 @@ mod tests {
 
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].instance_id, "office:clipboard");
+        assert_eq!(plans[0].executable, "addons/clipboard/clipboard.exe");
         assert_eq!(plans[0].connected_members, vec!["desktop".to_string()]);
     }
 
@@ -246,7 +256,7 @@ mod tests {
 
         assert_eq!(context.instance_id, "office:clipboard");
         assert_eq!(context.addon_id, "clipboard");
-        assert_eq!(context.executable, "clipboard.exe");
+        assert_eq!(context.executable, "addons/clipboard/clipboard.exe");
         assert_eq!(env_value(&context, "LOCALLINK_ADDON_ID"), Some("clipboard"));
         assert_eq!(
             env_value(&context, "LOCALLINK_ADDON_INSTANCE_ID"),
@@ -356,6 +366,7 @@ mod tests {
 
         assert_eq!(actions.start.len(), 1);
         assert_eq!(actions.start[0].instance_id, "office:clipboard");
+        assert_eq!(actions.start[0].executable, "addons/clipboard/clipboard.exe");
         assert!(actions.keep.is_empty());
         assert_eq!(actions.stop, vec!["office:old".to_string()]);
         assert!(!actions.is_empty());
