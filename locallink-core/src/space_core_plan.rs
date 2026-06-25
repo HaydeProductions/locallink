@@ -8,7 +8,13 @@ pub async fn plan_space_addons_for_core_state(
     state: &CoreRuntimeState,
     current_instances: &SharedSpaceAddonInstances,
 ) -> SpaceAddonSyncPlan {
-    let connected_peer_ids: HashSet<String> = state.connections.lock().await.keys().cloned().collect();
+    let connected_peer_ids: HashSet<String> = state
+        .connections
+        .lock()
+        .await
+        .keys()
+        .cloned()
+        .collect();
     let spaces = state.spaces.lock().await.clone();
     let addons = state.addons.lock().await.clone();
     let current_instance_ids = current_instances.lock().await.snapshot();
