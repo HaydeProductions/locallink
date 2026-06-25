@@ -2,6 +2,10 @@ use crate::addons::{load_addon_manifests, AddonRecord};
 use crate::config::space_membership::{
     load_or_create_space_membership_store, save_space_membership_store, ImportedSpaceInvite,
 };
+use crate::config::space_sync_live::{
+    apply_pending_space_sync_events, broadcast_update, imported_invite_from_space, send_accept,
+    send_invite, send_leave,
+};
 use crate::config::spaces::{save_space_store, SpaceKind, SpaceRecord, SpaceRegistry};
 use crate::config::{
     add_trusted_device, app_paths, load_trusted_devices, mac_is_trusted, normalize_mac,
@@ -550,11 +554,31 @@ async fn handle_request(
             membership.ensure_owned_space(&store, &space_id, &cfg.device_id)?;
             let invite = membership.create_invite(&store, &cfg.device_id, &space_id, &peer_id)?;
             let update = membership.sync_update(&store, &cfg.device_id, &space_id)?;
+            let space = store
+                .spaces
+                .iter()
+                .find(|space| space.space_id == space_id)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("unknown space after invite: {}", space_id))?;
+            let owner_record = membership
+                .records
+                .get(&space_id)
+                .ok_or_else(|| anyhow::anyhow!("missing membership record for {}", space_id))?;
+            let imported = imported_invite_from_space(
+                &space,
+                &cfg.device_id,
+                invite.invite_id.clone(),
+                update.revision,
+                owner_record.owner_enabled,
+                owner_record.key_epoch,
+            );
+            let delivery = send_invite(connections.clone(), &peer_id, imported).await;
             save_space_membership_store(&membership)?;
 
             Ok(serde_json::to_string(&ok(serde_json::json!({
                 "invite": invite,
-                "space_update": update
+                "space_update": update,
+                "delivery": delivery
             })))?)
         }
 
@@ -605,11 +629,31 @@ async fn handle_request(
             let mut store = spaces.lock().await;
             let mut membership = load_or_create_space_membership_store()?;
             let response = membership.accept_invite(&mut store, &cfg.device_id, &space_id)?;
+            let owner_device_id = membership
+                .records
+                .get(&space_id)
+                .map(|record| record.owner_device_id.clone());
+            let delivery = if let Some(owner_device_id) = owner_device_id {
+                Some(
+                    send_accept(
+                        connections.clone(),
+                        &owner_device_id,
+                        &space_id,
+                        &cfg.device_id,
+                    )
+                    .await,
+                )
+            } else {
+                None
+            };
             membership.validate_and_repair(&mut store)?;
             save_space_store(&store)?;
             save_space_membership_store(&membership)?;
 
-            Ok(serde_json::to_string(&ok(response))?)
+            Ok(serde_json::to_string(&ok(serde_json::json!({
+                "space": response,
+                "delivery": delivery
+            })))?)
         }
 
         "decline_space_invite" => {
@@ -634,12 +678,32 @@ async fn handle_request(
 
             let mut store = spaces.lock().await;
             let mut membership = load_or_create_space_membership_store()?;
+            let owner_device_id = membership
+                .records
+                .get(&space_id)
+                .map(|record| record.owner_device_id.clone());
             let response = membership.leave_space(&mut store, &cfg.device_id, &space_id)?;
+            let delivery = if let Some(owner_device_id) = owner_device_id {
+                Some(
+                    send_leave(
+                        connections.clone(),
+                        &owner_device_id,
+                        &space_id,
+                        &cfg.device_id,
+                    )
+                    .await,
+                )
+            } else {
+                None
+            };
             membership.validate_and_repair(&mut store)?;
             save_space_store(&store)?;
             save_space_membership_store(&membership)?;
 
-            Ok(serde_json::to_string(&ok(response))?)
+            Ok(serde_json::to_string(&ok(serde_json::json!({
+                "space": response,
+                "delivery": delivery
+            })))?)
         }
 
         "record_space_member_acceptance" => {
@@ -660,10 +724,15 @@ async fn handle_request(
                 &peer_id,
             )?;
             membership.validate_and_repair(&mut store)?;
+            let deliveries =
+                broadcast_update(connections.clone(), update.clone(), Some(&peer_id)).await;
             save_space_store(&store)?;
             save_space_membership_store(&membership)?;
 
-            Ok(serde_json::to_string(&ok(update))?)
+            Ok(serde_json::to_string(&ok(serde_json::json!({
+                "space_update": update,
+                "deliveries": deliveries
+            })))?)
         }
 
         "send_space_message" => {
@@ -1141,6 +1210,22 @@ async fn handle_request(
         }
 
         "poll_events" => {
+            {
+                let mut store = spaces.lock().await;
+                let mut membership = load_or_create_space_membership_store()?;
+                let report = apply_pending_space_sync_events(
+                    &cfg.device_id,
+                    &mut store,
+                    &mut membership,
+                    events.clone(),
+                    connections.clone(),
+                )
+                .await;
+                if !report.errors.is_empty() {
+                    eprintln!("space sync apply errors: {:?}", report.errors);
+                }
+            }
+
             let max_events = req.max_events.unwrap_or(100).clamp(1, 1000);
             let consumer_id = req.consumer_id.as_deref().unwrap_or("default");
             let response = take_events(
@@ -1155,6 +1240,22 @@ async fn handle_request(
         }
 
         "wait_events" => {
+            {
+                let mut store = spaces.lock().await;
+                let mut membership = load_or_create_space_membership_store()?;
+                let report = apply_pending_space_sync_events(
+                    &cfg.device_id,
+                    &mut store,
+                    &mut membership,
+                    events.clone(),
+                    connections.clone(),
+                )
+                .await;
+                if !report.errors.is_empty() {
+                    eprintln!("space sync apply errors: {:?}", report.errors);
+                }
+            }
+
             let max_events = req.max_events.unwrap_or(100).clamp(1, 1000);
             let wait_ms = req.wait_ms.unwrap_or(30_000).clamp(1, 30_000);
             let consumer_id = req.consumer_id.unwrap_or_else(|| "default".to_string());
