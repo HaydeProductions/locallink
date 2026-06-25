@@ -6,7 +6,14 @@ use crate::config::space_runtime::{
     SpaceAddonRuntimeActionPlan, SpaceAddonSyncPlan,
 };
 use crate::config::spaces::SpaceStore;
+use serde::Serialize;
 use std::collections::HashSet;
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SpaceAddonCoreSyncResult {
+    pub sync_plan: SpaceAddonSyncPlan,
+    pub action_plan: SpaceAddonRuntimeActionPlan,
+}
 
 pub fn plan_space_addon_delta_from_state(
     spaces: &SpaceStore,
@@ -45,4 +52,18 @@ pub async fn apply_space_addon_delta_to_core_state(
     sync_plan: &SpaceAddonSyncPlan,
 ) {
     apply_space_addon_sync_plan(&state.space_addon_instances, sync_plan).await;
+}
+
+pub async fn sync_space_addons_for_core_state(
+    state: &CoreRuntimeState,
+    core_api_addr: &str,
+) -> SpaceAddonCoreSyncResult {
+    let sync_plan = plan_space_addon_delta_from_core_state(state).await;
+    let action_plan = plan_space_addon_runtime_actions(&sync_plan, core_api_addr);
+    apply_space_addon_delta_to_core_state(state, &sync_plan).await;
+
+    SpaceAddonCoreSyncResult {
+        sync_plan,
+        action_plan,
+    }
 }
