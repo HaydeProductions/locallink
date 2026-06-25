@@ -221,6 +221,7 @@ mod tests {
                 space_id: "office".to_string(),
                 name: "Office".to_string(),
                 kind,
+                active: true,
                 members: members.into_iter().map(str::to_string).collect(),
                 addons,
             }],
@@ -243,6 +244,18 @@ mod tests {
         assert_eq!(plans[0].instance_id, "office:clipboard");
         assert_eq!(plans[0].executable, "addons/clipboard/clipboard.exe");
         assert_eq!(plans[0].connected_members, vec!["desktop".to_string()]);
+    }
+
+    #[test]
+    fn plans_active_spaces_without_connected_members() {
+        let store = store_with_space(SpaceKind::Group, vec!["desktop", "laptop"]);
+        let addons = vec![addon("clipboard")];
+        let connected = HashSet::new();
+
+        let plans = plan_space_addon_instances(&store, &addons, &connected);
+
+        assert_eq!(plans.len(), 1);
+        assert!(plans[0].connected_members.is_empty());
     }
 
     #[test]
@@ -277,9 +290,10 @@ mod tests {
 
     #[test]
     fn skips_inactive_spaces() {
-        let store = store_with_space(SpaceKind::Direct, vec!["desktop"]);
+        let mut store = store_with_space(SpaceKind::Direct, vec!["desktop"]);
+        store.spaces[0].active = false;
         let addons = vec![addon("clipboard")];
-        let connected = HashSet::new();
+        let connected = HashSet::from(["desktop".to_string()]);
 
         let plans = plan_space_addon_instances(&store, &addons, &connected);
 
