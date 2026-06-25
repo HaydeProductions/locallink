@@ -20,6 +20,9 @@ pub mod space_runtime;
 #[path = "space_sync.rs"]
 pub mod space_sync;
 
+#[path = "space_instances.rs"]
+pub mod space_instances;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub device_id: String,
