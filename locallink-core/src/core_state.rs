@@ -57,6 +57,7 @@ mod tests {
             space_id: "office".to_string(),
             name: "Office".to_string(),
             kind: crate::config::spaces::SpaceKind::Group,
+            active: false,
             members: vec!["desktop".to_string()],
             addons: HashMap::new(),
         });

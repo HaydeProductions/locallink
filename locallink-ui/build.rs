@@ -35,13 +35,13 @@ fn main() {
     generated = must_replace(
         generated,
         "    Addons,\n    PollEvents {",
-        "    Addons,\n    Spaces,\n    CreateSpace {\n        name: String,\n        kind: String,\n    },\n    AddSpaceMember {\n        space_id: String,\n        peer_id: String,\n    },\n    RemoveSpaceMember {\n        space_id: String,\n        peer_id: String,\n    },\n    PollEvents {",
+        "    Addons,\n    Spaces,\n    CreateSpace {\n        name: String,\n        kind: String,\n    },\n    ActivateSpace {\n        space_id: String,\n    },\n    DeactivateSpace {\n        space_id: String,\n    },\n    AddSpaceMember {\n        space_id: String,\n        peer_id: String,\n    },\n    RemoveSpaceMember {\n        space_id: String,\n        peer_id: String,\n    },\n    PollEvents {",
     );
 
     generated = must_replace(
         generated,
         "#[derive(Debug, Clone, Default)]\nstruct EventRow {",
-        "#[derive(Debug, Clone, Default)]\nstruct SpaceRow {\n    id: String,\n    name: String,\n    kind: String,\n    members: Vec<String>,\n    addon_count: usize,\n}\n\n#[derive(Debug, Clone, Default)]\nstruct EventRow {",
+        "#[derive(Debug, Clone, Default)]\nstruct SpaceRow {\n    id: String,\n    name: String,\n    kind: String,\n    active: bool,\n    members: Vec<String>,\n    addon_count: usize,\n}\n\n#[derive(Debug, Clone, Default)]\nstruct EventRow {",
     );
 
     generated = must_replace(
@@ -100,13 +100,13 @@ fn main() {
     generated = must_replace(
         generated,
         "            \"shutdown\" => {\n                self.status = None;\n                self.log(\"Core shutdown requested.\");\n            }",
-        "            \"shutdown\" => {\n                self.status = None;\n                self.log(\"Core shutdown requested.\");\n            }\n            \"create_space\" => {\n                self.log(\"Space created.\");\n                self.space_name.clear();\n                self.send_job(ApiJob::Spaces);\n            }\n            \"add_space_member\" => {\n                self.log(\"Space member added.\");\n                self.space_member_peer_id.clear();\n                self.send_job(ApiJob::Spaces);\n            }\n            \"remove_space_member\" => {\n                self.log(\"Space member removed.\");\n                self.send_job(ApiJob::Spaces);\n            }",
+        "            \"shutdown\" => {\n                self.status = None;\n                self.log(\"Core shutdown requested.\");\n            }\n            \"create_space\" => {\n                self.log(\"Space created.\");\n                self.space_name.clear();\n                self.send_job(ApiJob::Spaces);\n            }\n            \"activate_space\" => {\n                self.log(\"Space connected.\");\n                self.send_job(ApiJob::Spaces);\n                self.send_job(ApiJob::Addons);\n            }\n            \"deactivate_space\" => {\n                self.log(\"Space disconnected.\");\n                self.send_job(ApiJob::Spaces);\n                self.send_job(ApiJob::Addons);\n            }\n            \"add_space_member\" => {\n                self.log(\"Space member added.\");\n                self.space_member_peer_id.clear();\n                self.send_job(ApiJob::Spaces);\n            }\n            \"remove_space_member\" => {\n                self.log(\"Space member removed.\");\n                self.send_job(ApiJob::Spaces);\n            }",
     );
 
     generated = must_replace(
         generated,
         "    fn apply_events(&mut self, v: Value) {",
-        "    fn apply_spaces(&mut self, v: Value) {\n        self.spaces.clear();\n\n        if let Some(rows) = v.get(\"data\").and_then(|x| x.as_array()) {\n            for row in rows {\n                let addon_count = row\n                    .get(\"addons\")\n                    .and_then(|x| x.as_object())\n                    .map(|addons| addons.len())\n                    .unwrap_or(0);\n\n                self.spaces.push(SpaceRow {\n                    id: str_field(row, \"space_id\"),\n                    name: str_field(row, \"name\"),\n                    kind: str_field(row, \"kind\"),\n                    members: string_array_field(row, \"members\"),\n                    addon_count,\n                });\n            }\n        }\n    }\n\n    fn apply_events(&mut self, v: Value) {",
+        "    fn apply_spaces(&mut self, v: Value) {\n        self.spaces.clear();\n\n        if let Some(rows) = v.get(\"data\").and_then(|x| x.as_array()) {\n            for row in rows {\n                let addon_count = row\n                    .get(\"addons\")\n                    .and_then(|x| x.as_object())\n                    .map(|addons| addons.len())\n                    .unwrap_or(0);\n\n                self.spaces.push(SpaceRow {\n                    id: str_field(row, \"space_id\"),\n                    name: str_field(row, \"name\"),\n                    kind: str_field(row, \"kind\"),\n                    active: bool_field(row, \"active\"),\n                    members: string_array_field(row, \"members\"),\n                    addon_count,\n                });\n            }\n        }\n    }\n\n    fn apply_events(&mut self, v: Value) {",
     );
 
     generated = must_replace(
@@ -136,13 +136,13 @@ fn main() {
     generated = must_replace(
         generated,
         "            ApiJob::Connections => json!({ \"cmd\": \"list_connections\" }),\n            ApiJob::Addons => json!({ \"cmd\": \"list_addons\" }),",
-        "            ApiJob::Connections => json!({ \"cmd\": \"list_connections\" }),\n            ApiJob::Addons => json!({ \"cmd\": \"list_addons\" }),\n            ApiJob::Spaces => json!({ \"cmd\": \"list_spaces\" }),\n            ApiJob::CreateSpace { name, kind } => json!({\n                \"cmd\": \"create_space\",\n                \"name\": name,\n                \"kind\": kind\n            }),\n            ApiJob::AddSpaceMember { space_id, peer_id } => json!({\n                \"cmd\": \"add_space_member\",\n                \"space_id\": space_id,\n                \"peer_id\": peer_id\n            }),\n            ApiJob::RemoveSpaceMember { space_id, peer_id } => json!({\n                \"cmd\": \"remove_space_member\",\n                \"space_id\": space_id,\n                \"peer_id\": peer_id\n            }),",
+        "            ApiJob::Connections => json!({ \"cmd\": \"list_connections\" }),\n            ApiJob::Addons => json!({ \"cmd\": \"list_addons\" }),\n            ApiJob::Spaces => json!({ \"cmd\": \"list_spaces\" }),\n            ApiJob::CreateSpace { name, kind } => json!({\n                \"cmd\": \"create_space\",\n                \"name\": name,\n                \"kind\": kind\n            }),\n            ApiJob::ActivateSpace { space_id } => json!({\n                \"cmd\": \"activate_space\",\n                \"space_id\": space_id\n            }),\n            ApiJob::DeactivateSpace { space_id } => json!({\n                \"cmd\": \"deactivate_space\",\n                \"space_id\": space_id\n            }),\n            ApiJob::AddSpaceMember { space_id, peer_id } => json!({\n                \"cmd\": \"add_space_member\",\n                \"space_id\": space_id,\n                \"peer_id\": peer_id\n            }),\n            ApiJob::RemoveSpaceMember { space_id, peer_id } => json!({\n                \"cmd\": \"remove_space_member\",\n                \"space_id\": space_id,\n                \"peer_id\": peer_id\n            }),",
     );
 
     generated = must_replace(
         generated,
         "        ApiJob::Connections => \"connections\",\n        ApiJob::Addons => \"addons\",",
-        "        ApiJob::Connections => \"connections\",\n        ApiJob::Addons => \"addons\",\n        ApiJob::Spaces => \"spaces\",\n        ApiJob::CreateSpace { .. } => \"create_space\",\n        ApiJob::AddSpaceMember { .. } => \"add_space_member\",\n        ApiJob::RemoveSpaceMember { .. } => \"remove_space_member\",",
+        "        ApiJob::Connections => \"connections\",\n        ApiJob::Addons => \"addons\",\n        ApiJob::Spaces => \"spaces\",\n        ApiJob::CreateSpace { .. } => \"create_space\",\n        ApiJob::ActivateSpace { .. } => \"activate_space\",\n        ApiJob::DeactivateSpace { .. } => \"deactivate_space\",\n        ApiJob::AddSpaceMember { .. } => \"add_space_member\",\n        ApiJob::RemoveSpaceMember { .. } => \"remove_space_member\",",
     );
 
     generated = must_replace(
@@ -389,13 +389,48 @@ impl LocalLinkUi {
                         });
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                            let color = if space.kind == "group" {
+                            let kind_color = if space.kind == "group" {
                                 color_accent()
                             } else {
                                 color_success()
                             };
-                            state_chip(ui, &space.kind, color);
+                            state_chip(ui, &space.kind, kind_color);
+                            let active_color = if space.active { color_success() } else { color_muted() };
+                            let active_label = if space.active { "Active" } else { "Inactive" };
+                            state_chip(ui, active_label, active_color);
                         });
+                    });
+
+                    ui.add_space(12.0);
+
+                    ui.horizontal_wrapped(|ui| {
+                        if space.active {
+                            if ui
+                                .add(danger_button("Disconnect Space"))
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                .clicked()
+                            {
+                                self.send_job(ApiJob::DeactivateSpace {
+                                    space_id: space.id.clone(),
+                                });
+                            }
+                        } else if ui
+                            .add(primary_button("Connect Space"))
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                        {
+                            self.send_job(ApiJob::ActivateSpace {
+                                space_id: space.id.clone(),
+                            });
+                        }
+
+                        ui.label(
+                            egui::RichText::new(
+                                "Space connection controls local activity only; device connections stay separate.",
+                            )
+                            .color(color_muted())
+                            .size(12.5),
+                        );
                     });
 
                     ui.add_space(14.0);
@@ -532,6 +567,7 @@ impl LocalLinkUi {
                         ui.separator();
                         mono_line(ui, "Space ID", &ellipsize(&space.id, 60));
                         mono_line(ui, "Kind", &space.kind);
+                        mono_line(ui, "Active", if space.active { "true" } else { "false" });
                         mono_line(ui, "Add-ons", &space.addon_count.to_string());
                     }
                 });

@@ -321,6 +321,10 @@ async fn handle_request(
                     "create_space",
                     "add_space_member",
                     "remove_space_member",
+                    "activate_space",
+                    "deactivate_space",
+                    "connect_space",
+                    "disconnect_space",
                     "send_space_message",
                     "list_space_addons",
                     "set_space_addon_enabled",
@@ -390,6 +394,7 @@ async fn handle_request(
                 space_id: space_id.clone(),
                 name,
                 kind,
+                active: false,
                 members: Vec::new(),
                 addons: HashMap::new(),
             });
@@ -403,6 +408,34 @@ async fn handle_request(
                 .find(|space| space.space_id == space_id)
                 .cloned()
                 .ok_or_else(|| anyhow::anyhow!("space was not created"))?;
+
+            Ok(serde_json::to_string(&ok(response))?)
+        }
+
+        "activate_space" | "connect_space" => {
+            let space_id = req
+                .space_id
+                .ok_or_else(|| anyhow::anyhow!("activate_space requires space_id"))?;
+
+            let mut store = spaces.lock().await;
+            let mut updated = store.clone();
+            let response = updated.set_space_active(&space_id, true)?;
+            save_space_store(&updated)?;
+            *store = updated;
+
+            Ok(serde_json::to_string(&ok(response))?)
+        }
+
+        "deactivate_space" | "disconnect_space" => {
+            let space_id = req
+                .space_id
+                .ok_or_else(|| anyhow::anyhow!("deactivate_space requires space_id"))?;
+
+            let mut store = spaces.lock().await;
+            let mut updated = store.clone();
+            let response = updated.set_space_active(&space_id, false)?;
+            save_space_store(&updated)?;
+            *store = updated;
 
             Ok(serde_json::to_string(&ok(response))?)
         }
