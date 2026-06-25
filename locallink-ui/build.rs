@@ -28,6 +28,107 @@ fn main() {
 
     generated = must_replace(
         generated,
+        "enum Screen {\n    Discover,\n    Devices,\n    Addons,\n    Activity,\n}",
+        "enum Screen {\n    Discover,\n    Devices,\n    Spaces,\n    Addons,\n    Activity,\n}",
+    );
+
+    generated = must_replace(
+        generated,
+        "    Addons,\n    PollEvents {",
+        "    Addons,\n    Spaces,\n    PollEvents {",
+    );
+
+    generated = must_replace(
+        generated,
+        "#[derive(Debug, Clone, Default)]\nstruct EventRow {",
+        "#[derive(Debug, Clone, Default)]\nstruct SpaceRow {\n    id: String,\n    name: String,\n    kind: String,\n    members: Vec<String>,\n    addon_count: usize,\n}\n\n#[derive(Debug, Clone, Default)]\nstruct EventRow {",
+    );
+
+    generated = must_replace(
+        generated,
+        "    addons: Vec<AddonRow>,\n    events: Vec<EventRow>,",
+        "    addons: Vec<AddonRow>,\n    spaces: Vec<SpaceRow>,\n    events: Vec<EventRow>,",
+    );
+
+    generated = must_replace(
+        generated,
+        "            addons: Vec::new(),\n            events: Vec::new(),",
+        "            addons: Vec::new(),\n            spaces: Vec::new(),\n            events: Vec::new(),",
+    );
+
+    generated = must_replace(
+        generated,
+        "                let _ = refresh_tx.send(ApiJob::Connections);\n\n                if tick % 3 == 0 {\n                    let _ = refresh_tx.send(ApiJob::Addons);\n                }",
+        "                let _ = refresh_tx.send(ApiJob::Connections);\n\n                if tick % 3 == 0 {\n                    let _ = refresh_tx.send(ApiJob::Spaces);\n                    let _ = refresh_tx.send(ApiJob::Addons);\n                }",
+    );
+
+    generated = must_replace(
+        generated,
+        "        self.send_job(ApiJob::Connections);\n        self.send_job(ApiJob::Addons);",
+        "        self.send_job(ApiJob::Connections);\n        self.send_job(ApiJob::Spaces);\n        self.send_job(ApiJob::Addons);",
+    );
+
+    generated = must_replace(
+        generated,
+        "            Screen::Addons => {\n                self.send_job(ApiJob::Addons);\n            }",
+        "            Screen::Spaces => {\n                self.send_job(ApiJob::Spaces);\n            }\n            Screen::Addons => {\n                self.send_job(ApiJob::Addons);\n            }",
+    );
+
+    generated = must_replace(
+        generated,
+        "            \"addons\" => self.apply_addons(value),\n            \"poll_events\" => self.apply_events(value),",
+        "            \"addons\" => self.apply_addons(value),\n            \"spaces\" => self.apply_spaces(value),\n            \"poll_events\" => self.apply_events(value),",
+    );
+
+    generated = generated.replace(
+        "                self.send_job(ApiJob::Connections);\n                self.send_job(ApiJob::Addons);",
+        "                self.send_job(ApiJob::Connections);\n                self.send_job(ApiJob::Spaces);\n                self.send_job(ApiJob::Addons);",
+    );
+
+    generated = must_replace(
+        generated,
+        "    fn apply_events(&mut self, v: Value) {",
+        "    fn apply_spaces(&mut self, v: Value) {\n        self.spaces.clear();\n\n        if let Some(rows) = v.get(\"data\").and_then(|x| x.as_array()) {\n            for row in rows {\n                let addon_count = row\n                    .get(\"addons\")\n                    .and_then(|x| x.as_object())\n                    .map(|addons| addons.len())\n                    .unwrap_or(0);\n\n                self.spaces.push(SpaceRow {\n                    id: str_field(row, \"space_id\"),\n                    name: str_field(row, \"name\"),\n                    kind: str_field(row, \"kind\"),\n                    members: string_array_field(row, \"members\"),\n                    addon_count,\n                });\n            }\n        }\n    }\n\n    fn apply_events(&mut self, v: Value) {",
+    );
+
+    generated = must_replace(
+        generated,
+        "                                Screen::Devices => self.screen_devices(ui),\n                                Screen::Addons => self.screen_addons(ui),",
+        "                                Screen::Devices => self.screen_devices(ui),\n                                Screen::Spaces => self.screen_spaces(ui),\n                                Screen::Addons => self.screen_addons(ui),",
+    );
+
+    generated = must_replace(
+        generated,
+        "        let container_width: f32 = available_width.min(390.0).max(312.0);",
+        "        let container_width: f32 = available_width.min(430.0).max(350.0);",
+    );
+
+    generated = must_replace(
+        generated,
+        "        let tab_count: f32 = 4.0;",
+        "        let tab_count: f32 = 5.0;",
+    );
+
+    generated = must_replace(
+        generated,
+        "            (Screen::Devices, \"Devices\"),\n            (Screen::Addons, \"Add-ons\"),",
+        "            (Screen::Devices, \"Devices\"),\n            (Screen::Spaces, \"Spaces\"),\n            (Screen::Addons, \"Add-ons\"),",
+    );
+
+    generated = must_replace(
+        generated,
+        "            ApiJob::Connections => json!({ \"cmd\": \"list_connections\" }),\n            ApiJob::Addons => json!({ \"cmd\": \"list_addons\" }),",
+        "            ApiJob::Connections => json!({ \"cmd\": \"list_connections\" }),\n            ApiJob::Addons => json!({ \"cmd\": \"list_addons\" }),\n            ApiJob::Spaces => json!({ \"cmd\": \"list_spaces\" }),",
+    );
+
+    generated = must_replace(
+        generated,
+        "        ApiJob::Connections => \"connections\",\n        ApiJob::Addons => \"addons\",",
+        "        ApiJob::Connections => \"connections\",\n        ApiJob::Addons => \"addons\",\n        ApiJob::Spaces => \"spaces\",",
+    );
+
+    generated = must_replace(
+        generated,
         "            .with_title(\"LocalLink\")\n            .with_inner_size([470.0, 640.0])\n            .with_min_inner_size([390.0, 520.0]),",
         "            .with_title(\"LocalLink\")\n            .with_inner_size([470.0, 640.0])\n            .with_min_inner_size([390.0, 520.0])\n            .with_icon(local_link_window_icon()),",
     );
@@ -35,7 +136,7 @@ fn main() {
     generated = must_replace(
         generated,
         "    fn start_core(&mut self) {\n        match start_sibling_core() {\n            Ok(()) => {\n                self.log(\"Starting LocalLink Core...\");\n                std::thread::sleep(Duration::from_millis(250));\n                self.refresh_all();\n            }\n            Err(e) => self.log(format!(\"Could not start core: {e}\")),\n        }\n    }\n\n",
-        "    fn start_core(&mut self) {\n        force_stop_core_processes();\n        std::thread::sleep(Duration::from_millis(200));\n\n        match start_sibling_core() {\n            Ok(()) => {\n                self.log(\"Starting LocalLink Core...\");\n                std::thread::sleep(Duration::from_millis(250));\n                self.refresh_all();\n            }\n            Err(e) => self.log(format!(\"Could not start core: {e}\")),\n        }\n    }\n\n    fn stop_core(&mut self) {\n        self.send_job(ApiJob::Shutdown);\n        force_stop_core_processes();\n\n        self.status = None;\n        self.peers.clear();\n        self.connections.clear();\n        self.addons.clear();\n\n        self.log(\"Stopped LocalLink Core.\");\n    }\n\n",
+        "    fn start_core(&mut self) {\n        force_stop_core_processes();\n        std::thread::sleep(Duration::from_millis(200));\n\n        match start_sibling_core() {\n            Ok(()) => {\n                self.log(\"Starting LocalLink Core...\");\n                std::thread::sleep(Duration::from_millis(250));\n                self.refresh_all();\n            }\n            Err(e) => self.log(format!(\"Could not start core: {e}\")),\n        }\n    }\n\n    fn stop_core(&mut self) {\n        self.send_job(ApiJob::Shutdown);\n        force_stop_core_processes();\n\n        self.status = None;\n        self.peers.clear();\n        self.connections.clear();\n        self.spaces.clear();\n        self.addons.clear();\n\n        self.log(\"Stopped LocalLink Core.\");\n    }\n\n",
     );
 
     generated = must_replace(
@@ -83,6 +184,7 @@ fn main() {
         "        if enabled {\n            self.log(format!(\"Enabled {}\", addon_snapshot.name));\n        } else {\n            self.log(format!(\"Disabled {}\", addon_snapshot.name));\n        }\n\n        self.send_job(ApiJob::ReloadAddons);",
     );
 
+    generated.push_str(SPACES_UI_CODE);
     generated.push_str(NETWORK_REQUIREMENTS_CODE);
     generated.push_str(PROCESS_CONTROL_CODE);
     generated.push_str(WINDOW_ICON_CODE);
@@ -121,6 +223,138 @@ fn must_replace(input: String, from: &str, to: &str) -> String {
 
     output
 }
+
+const SPACES_UI_CODE: &str = r#"
+
+impl LocalLinkUi {
+    fn screen_spaces(&mut self, ui: &mut egui::Ui) {
+        page_title(
+            ui,
+            "Spaces",
+            "Connection spaces group devices and control per-space add-on state.",
+        );
+
+        ui.add_space(14.0);
+
+        if !self.core_online() {
+            notice(
+                ui,
+                "Core is offline",
+                "Start LocalLink Core to load connection spaces.",
+                color_error(),
+            );
+            return;
+        }
+
+        if self.spaces.is_empty() {
+            notice(
+                ui,
+                "No spaces yet",
+                "Spaces can be created from the Core API. UI create/member controls are next.",
+                color_warning(),
+            );
+            return;
+        }
+
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for space in self.spaces.clone() {
+                device_card(ui, |ui| {
+                    ui.horizontal_top(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_min_width(0.0);
+                            ui.set_max_width((ui.available_width() - 110.0).max(180.0));
+
+                            ui.label(
+                                egui::RichText::new(&space.name)
+                                    .color(color_text())
+                                    .size(21.0)
+                                    .strong(),
+                            );
+
+                            ui.add_space(4.0);
+
+                            let member_summary = if space.members.is_empty() {
+                                "No members".to_string()
+                            } else if space.members.len() == 1 {
+                                "1 member".to_string()
+                            } else {
+                                format!("{} members", space.members.len())
+                            };
+
+                            ui.label(
+                                egui::RichText::new(member_summary)
+                                    .color(color_muted())
+                                    .size(14.0),
+                            );
+                        });
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                            let color = if space.kind == "group" {
+                                color_accent()
+                            } else {
+                                color_success()
+                            };
+                            state_chip(ui, &space.kind, color);
+                        });
+                    });
+
+                    ui.add_space(14.0);
+
+                    egui::Frame::none()
+                        .fill(color_panel().linear_multiply(0.82))
+                        .stroke(egui::Stroke::new(1.0, color_border().linear_multiply(0.45)))
+                        .rounding(egui::Rounding::same(18))
+                        .inner_margin(egui::Margin::symmetric(16, 13))
+                        .show(ui, |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.label(
+                                        egui::RichText::new("Per-space add-ons")
+                                            .color(color_text())
+                                            .size(15.0)
+                                            .strong(),
+                                    );
+
+                                    ui.add_space(2.0);
+
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{} configured desired state(s). Toggle controls are next.",
+                                            space.addon_count
+                                        ))
+                                        .color(color_muted())
+                                        .size(12.5),
+                                    );
+                                });
+
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        state_chip(ui, "Read-only", color_muted());
+                                    },
+                                );
+                            });
+                        });
+
+                    if !space.members.is_empty() {
+                        ui.add_space(10.0);
+                        mono_line(ui, "Members", &ellipsize(&space.members.join(", "), 80));
+                    }
+
+                    if self.show_advanced {
+                        ui.separator();
+                        mono_line(ui, "Space ID", &ellipsize(&space.id, 60));
+                        mono_line(ui, "Kind", &space.kind);
+                        mono_line(ui, "Add-ons", &space.addon_count.to_string());
+                    }
+                });
+
+                ui.add_space(12.0);
+            }
+        });
+    }
+}
+"#;
 
 const NETWORK_REQUIREMENTS_CODE: &str = r#"
 
