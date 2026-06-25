@@ -1,10 +1,11 @@
 use crate::config::space_membership::{
-    ImportedSpaceInvite, SpaceMembershipStore, SpaceSyncUpdate, SPACE_SYNC_SERVICE,
+    load_or_create_space_membership_store, save_space_membership_store, ImportedSpaceInvite,
+    SpaceMembershipStore, SpaceSyncUpdate, SPACE_SYNC_SERVICE,
 };
-use crate::config::spaces::{save_space_store, SpaceRecord, SpaceStore};
-use crate::transport::{
-    send_space_service_message, take_events, ApiEvent, ConnectionRegistry, EventQueue,
-};
+use crate::config::spaces::{save_space_store, SpaceRecord, SpaceRegistry, SpaceStore};
+use crate::config::{load_or_create_config, Config};
+use crate::discovery::send_core_space_service_message;
+use crate::transport::{take_events, ApiEvent, ConnectionRegistry, EventQueue};
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
@@ -45,7 +46,7 @@ pub fn decode_sync_message(data_b64: &str) -> Result<SpaceSyncMessage> {
 }
 
 pub async fn send_sync_message(
-    connections: ConnectionRegistry,
+    _connections: ConnectionRegistry,
     peer_id: &str,
     space_id: &str,
     message: SpaceSyncMessage,
@@ -62,15 +63,20 @@ pub async fn send_sync_message(
         }
     };
 
-    match send_space_service_message(
-        connections,
-        peer_id,
-        space_id,
-        SPACE_SYNC_SERVICE,
-        Some(peer_id.to_string()),
-        &data_b64,
-    )
-    .await
+    let cfg = match load_or_create_config() {
+        Ok(cfg) => cfg,
+        Err(err) => {
+            return SyncDeliveryResult {
+                peer_id: peer_id.to_string(),
+                ok: false,
+                message_id: None,
+                error: Some(err.to_string()),
+            };
+        }
+    };
+
+    match send_core_space_service_message(&cfg, peer_id, space_id, SPACE_SYNC_SERVICE, &data_b64)
+        .await
     {
         Ok(message_id) => SyncDeliveryResult {
             peer_id: peer_id.to_string(),
@@ -211,15 +217,7 @@ pub async fn apply_pending_space_sync_events(
     let mut report = SpaceSyncApplyReport::default();
 
     for event in incoming {
-        match apply_event(
-            local_device_id,
-            spaces,
-            membership,
-            connections.clone(),
-            event,
-        )
-        .await
-        {
+        match apply_event(local_device_id, spaces, membership, connections.clone(), event).await {
             Ok(true) => report.applied += 1,
             Ok(false) => report.ignored += 1,
             Err(err) => report.errors.push(err.to_string()),
@@ -230,7 +228,7 @@ pub async fn apply_pending_space_sync_events(
         if let Err(err) = save_space_store(spaces) {
             report.errors.push(err.to_string());
         }
-        if let Err(err) = crate::config::space_membership::save_space_membership_store(membership) {
+        if let Err(err) = save_space_membership_store(membership) {
             report.errors.push(err.to_string());
         }
     }
@@ -238,11 +236,38 @@ pub async fn apply_pending_space_sync_events(
     report
 }
 
+pub async fn apply_core_space_sync_message(
+    cfg: &Config,
+    spaces: SpaceRegistry,
+    peer_id: &str,
+    _peer_name: &str,
+    service: &str,
+    data_b64: &str,
+) -> Result<bool> {
+    if service != SPACE_SYNC_SERVICE {
+        return Ok(false);
+    }
+
+    let message = decode_sync_message(data_b64)?;
+    let mut store = spaces.lock().await;
+    let mut membership = load_or_create_space_membership_store()?;
+
+    let applied =
+        apply_message(&cfg.device_id, &mut store, &mut membership, peer_id, message).await?;
+
+    if applied {
+        save_space_store(&store)?;
+        save_space_membership_store(&membership)?;
+    }
+
+    Ok(applied)
+}
+
 async fn apply_event(
     local_device_id: &str,
     spaces: &mut SpaceStore,
     membership: &mut SpaceMembershipStore,
-    connections: ConnectionRegistry,
+    _connections: ConnectionRegistry,
     event: ApiEvent,
 ) -> Result<bool> {
     if event.kind != "space_service_data" || event.service != SPACE_SYNC_SERVICE {
@@ -252,11 +277,21 @@ async fn apply_event(
     let Some(data_b64) = event.data_b64.as_deref() else {
         return Ok(false);
     };
-    let message = decode_sync_message(data_b64)?;
 
+    let message = decode_sync_message(data_b64)?;
+    apply_message(local_device_id, spaces, membership, &event.peer_id, message).await
+}
+
+async fn apply_message(
+    local_device_id: &str,
+    spaces: &mut SpaceStore,
+    membership: &mut SpaceMembershipStore,
+    sender_peer_id: &str,
+    message: SpaceSyncMessage,
+) -> Result<bool> {
     match message {
         SpaceSyncMessage::Invite { invite } => {
-            if invite.owner_device_id != event.peer_id {
+            if invite.owner_device_id != sender_peer_id {
                 anyhow::bail!("space invite owner did not match sender");
             }
             if spaces
@@ -271,7 +306,7 @@ async fn apply_event(
             Ok(true)
         }
         SpaceSyncMessage::InviteAccept { space_id, peer_id } => {
-            if peer_id != event.peer_id {
+            if peer_id != sender_peer_id {
                 anyhow::bail!("space invite acceptance sender did not match peer_id");
             }
             let update = membership.record_member_acceptance(
@@ -281,12 +316,16 @@ async fn apply_event(
                 &peer_id,
             )?;
             membership.validate_and_repair(spaces)?;
-            let _ = broadcast_update(connections, update, None).await;
+
+            if let Ok(cfg) = load_or_create_config() {
+                let _ = broadcast_update_from_config(&cfg, update, None).await;
+            }
+
             Ok(true)
         }
         SpaceSyncMessage::InviteDecline { .. } => Ok(false),
         SpaceSyncMessage::Leave { space_id, peer_id } => {
-            if peer_id != event.peer_id {
+            if peer_id != sender_peer_id {
                 anyhow::bail!("space leave sender did not match peer_id");
             }
             let update = remove_member_after_leave(
@@ -298,14 +337,16 @@ async fn apply_event(
             )?;
             membership.validate_and_repair(spaces)?;
             if let Some(update) = update {
-                let _ = broadcast_update(connections, update, Some(&peer_id)).await;
+                if let Ok(cfg) = load_or_create_config() {
+                    let _ = broadcast_update_from_config(&cfg, update, Some(&peer_id)).await;
+                }
                 Ok(true)
             } else {
                 Ok(false)
             }
         }
         SpaceSyncMessage::Update { update } => {
-            if update.owner_device_id != event.peer_id {
+            if update.owner_device_id != sender_peer_id {
                 anyhow::bail!("space update owner did not match sender");
             }
             let applied = membership.apply_owner_update(spaces, update)?.is_some();
@@ -313,6 +354,67 @@ async fn apply_event(
             Ok(applied)
         }
     }
+}
+
+async fn broadcast_update_from_config(
+    cfg: &Config,
+    update: SpaceSyncUpdate,
+    exclude: Option<&str>,
+) -> Vec<SyncDeliveryResult> {
+    let mut results = Vec::new();
+    let mut seen = HashSet::<String>::new();
+
+    for peer_id in &update.members {
+        if peer_id == &update.owner_device_id {
+            continue;
+        }
+        if exclude.map(|excluded| excluded == peer_id).unwrap_or(false) {
+            continue;
+        }
+        if !seen.insert(peer_id.clone()) {
+            continue;
+        }
+
+        let data_b64 = match encode_sync_message(&SpaceSyncMessage::Update {
+            update: update.clone(),
+        }) {
+            Ok(data_b64) => data_b64,
+            Err(err) => {
+                results.push(SyncDeliveryResult {
+                    peer_id: peer_id.clone(),
+                    ok: false,
+                    message_id: None,
+                    error: Some(err.to_string()),
+                });
+                continue;
+            }
+        };
+
+        match send_core_space_service_message(
+            cfg,
+            peer_id,
+            &update.space_id,
+            SPACE_SYNC_SERVICE,
+            &data_b64,
+        )
+        .await
+        {
+            Ok(message_id) => results.push(SyncDeliveryResult {
+                peer_id: peer_id.clone(),
+                ok: true,
+                message_id: Some(message_id),
+                error: None,
+            }),
+            Err(err) => results.push(SyncDeliveryResult {
+                peer_id: peer_id.clone(),
+                ok: false,
+                message_id: None,
+                error: Some(err.to_string()),
+            }),
+        }
+    }
+
+    results
 }
 
 fn remove_member_after_leave(

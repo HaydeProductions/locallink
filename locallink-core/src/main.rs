@@ -164,6 +164,7 @@ async fn main() -> Result<()> {
         runtime_state.connecting.clone(),
         runtime_state.connections.clone(),
         runtime_state.events.clone(),
+        runtime_state.spaces.clone(),
     )
     .await
 }
