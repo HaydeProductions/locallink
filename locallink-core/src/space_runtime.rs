@@ -23,6 +23,19 @@ pub struct SpaceAddonRuntimeContext {
     pub env: BTreeMap<String, String>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SpaceAddonRuntimeActionPlan {
+    pub start: Vec<SpaceAddonRuntimeContext>,
+    pub keep: Vec<String>,
+    pub stop: Vec<String>,
+}
+
+impl SpaceAddonRuntimeActionPlan {
+    pub fn is_empty(&self) -> bool {
+        self.start.is_empty() && self.keep.is_empty() && self.stop.is_empty()
+    }
+}
+
 impl SpaceAddonInstancePlan {
     pub fn runtime_context(&self, core_api_addr: &str) -> SpaceAddonRuntimeContext {
         let mut env = BTreeMap::new();
@@ -143,6 +156,25 @@ pub fn plan_space_addon_sync(
     stop.sort();
 
     SpaceAddonSyncPlan { start, keep, stop }
+}
+
+pub fn plan_space_addon_runtime_actions(
+    sync_plan: &SpaceAddonSyncPlan,
+    core_api_addr: &str,
+) -> SpaceAddonRuntimeActionPlan {
+    let start = sync_plan
+        .start
+        .iter()
+        .map(|plan| plan.runtime_context(core_api_addr))
+        .collect();
+    let keep = sync_plan
+        .keep
+        .iter()
+        .map(|plan| plan.instance_id.clone())
+        .collect();
+    let stop = sync_plan.stop.clone();
+
+    SpaceAddonRuntimeActionPlan { start, keep, stop }
 }
 
 fn space_kind_env(kind: &SpaceKind) -> String {
@@ -309,5 +341,23 @@ mod tests {
         assert!(sync.start.is_empty());
         assert!(sync.keep.is_empty());
         assert_eq!(sync.stop, vec!["office:clipboard".to_string()]);
+    }
+
+    #[test]
+    fn runtime_action_plan_maps_sync_plan_to_contexts() {
+        let store = store_with_space(SpaceKind::Group, vec!["desktop"]);
+        let addons = vec![addon("clipboard")];
+        let connected = HashSet::from(["desktop".to_string()]);
+        let desired = plan_space_addon_instances(&store, &addons, &connected);
+        let running = HashSet::from(["office:old".to_string()]);
+        let sync = plan_space_addon_sync(&desired, &running);
+
+        let actions = plan_space_addon_runtime_actions(&sync, "127.0.0.1:47900");
+
+        assert_eq!(actions.start.len(), 1);
+        assert_eq!(actions.start[0].instance_id, "office:clipboard");
+        assert!(actions.keep.is_empty());
+        assert_eq!(actions.stop, vec!["office:old".to_string()]);
+        assert!(!actions.is_empty());
     }
 }
