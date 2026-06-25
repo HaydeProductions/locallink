@@ -1,7 +1,7 @@
 use crate::addons::AddonRecord;
 use crate::config::spaces::{SpaceKind, SpaceStore};
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SpaceAddonInstancePlan {
@@ -13,6 +13,36 @@ pub struct SpaceAddonInstancePlan {
     pub addon_name: String,
     pub executable: String,
     pub connected_members: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SpaceAddonRuntimeContext {
+    pub instance_id: String,
+    pub addon_id: String,
+    pub executable: String,
+    pub env: BTreeMap<String, String>,
+}
+
+impl SpaceAddonInstancePlan {
+    pub fn runtime_context(&self, core_api_addr: &str) -> SpaceAddonRuntimeContext {
+        let mut env = BTreeMap::new();
+        env.insert("LOCALLINK_ADDON_ID".to_string(), self.addon_id.clone());
+        env.insert(
+            "LOCALLINK_ADDON_INSTANCE_ID".to_string(),
+            self.instance_id.clone(),
+        );
+        env.insert("LOCALLINK_CORE_API_ADDR".to_string(), core_api_addr.to_string());
+        env.insert("LOCALLINK_SPACE_ID".to_string(), self.space_id.clone());
+        env.insert("LOCALLINK_SPACE_KIND".to_string(), space_kind_env(&self.space_kind));
+        env.insert("LOCALLINK_SPACE_NAME".to_string(), self.space_name.clone());
+
+        SpaceAddonRuntimeContext {
+            instance_id: self.instance_id.clone(),
+            addon_id: self.addon_id.clone(),
+            executable: self.executable.clone(),
+            env,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -111,6 +141,13 @@ pub fn plan_space_addon_sync(
     SpaceAddonSyncPlan { start, keep, stop }
 }
 
+fn space_kind_env(kind: &SpaceKind) -> String {
+    match kind {
+        SpaceKind::Direct => "direct".to_string(),
+        SpaceKind::Group => "group".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,6 +182,10 @@ mod tests {
         }
     }
 
+    fn env_value<'a>(context: &'a SpaceAddonRuntimeContext, key: &str) -> Option<&'a str> {
+        context.env.get(key).map(String::as_str)
+    }
+
     #[test]
     fn plans_enabled_addons_for_active_spaces() {
         let store = store_with_space(SpaceKind::Group, vec!["desktop", "laptop"]);
@@ -156,6 +197,32 @@ mod tests {
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].instance_id, "office:clipboard");
         assert_eq!(plans[0].connected_members, vec!["desktop".to_string()]);
+    }
+
+    #[test]
+    fn runtime_context_sets_space_and_addon_env() {
+        let store = store_with_space(SpaceKind::Group, vec!["desktop"]);
+        let addons = vec![addon("clipboard")];
+        let connected = HashSet::from(["desktop".to_string()]);
+        let plans = plan_space_addon_instances(&store, &addons, &connected);
+
+        let context = plans[0].runtime_context("127.0.0.1:17345");
+
+        assert_eq!(context.instance_id, "office:clipboard");
+        assert_eq!(context.addon_id, "clipboard");
+        assert_eq!(context.executable, "clipboard.exe");
+        assert_eq!(env_value(&context, "LOCALLINK_ADDON_ID"), Some("clipboard"));
+        assert_eq!(
+            env_value(&context, "LOCALLINK_ADDON_INSTANCE_ID"),
+            Some("office:clipboard")
+        );
+        assert_eq!(
+            env_value(&context, "LOCALLINK_CORE_API_ADDR"),
+            Some("127.0.0.1:17345")
+        );
+        assert_eq!(env_value(&context, "LOCALLINK_SPACE_ID"), Some("office"));
+        assert_eq!(env_value(&context, "LOCALLINK_SPACE_KIND"), Some("group"));
+        assert_eq!(env_value(&context, "LOCALLINK_SPACE_NAME"), Some("Office"));
     }
 
     #[test]
