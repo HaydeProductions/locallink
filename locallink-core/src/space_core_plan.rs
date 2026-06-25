@@ -13,5 +13,10 @@ pub async fn plan_space_addons_for_core_state(
     let addons = state.addons.lock().await.clone();
     let current_instance_ids = current_instances.lock().await.snapshot();
 
-    plan_space_addon_delta_from_state(&spaces, &addons, &connected_peer_ids, &current_instance_ids)
+    plan_space_addon_delta_from_state(
+        &spaces,
+        &addons,
+        &connected_peer_ids,
+        &current_instance_ids,
+    )
 }
