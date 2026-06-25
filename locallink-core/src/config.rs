@@ -17,6 +17,9 @@ pub mod core_state;
 #[path = "space_runtime.rs"]
 pub mod space_runtime;
 
+#[path = "space_sync.rs"]
+pub mod space_sync;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub device_id: String,
