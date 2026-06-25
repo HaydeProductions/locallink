@@ -63,6 +63,12 @@ struct ApiRequest {
 
     #[serde(default)]
     name: Option<String>,
+
+    #[serde(default)]
+    addon_id: Option<String>,
+
+    #[serde(default)]
+    enabled: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -316,6 +322,8 @@ async fn handle_request(
                     "add_space_member",
                     "remove_space_member",
                     "send_space_message",
+                    "list_space_addons",
+                    "set_space_addon_enabled",
                     "list_addons",
                     "reload_addons",
                     "send_message",
@@ -531,6 +539,42 @@ async fn handle_request(
                 target_peer_id,
                 deliveries,
             };
+
+            Ok(serde_json::to_string(&ok(response))?)
+        }
+
+        "list_space_addons" => {
+            let space_id = req
+                .space_id
+                .ok_or_else(|| anyhow::anyhow!("list_space_addons requires space_id"))?;
+
+            let store = spaces.lock().await;
+            let response = store.space_addons(&space_id)?;
+
+            Ok(serde_json::to_string(&ok(response))?)
+        }
+
+        "set_space_addon_enabled" => {
+            let space_id = req
+                .space_id
+                .ok_or_else(|| anyhow::anyhow!("set_space_addon_enabled requires space_id"))?;
+            let addon_id = req
+                .addon_id
+                .ok_or_else(|| anyhow::anyhow!("set_space_addon_enabled requires addon_id"))?;
+            let enabled = req
+                .enabled
+                .ok_or_else(|| anyhow::anyhow!("set_space_addon_enabled requires enabled"))?;
+
+            let mut store = spaces.lock().await;
+            let mut updated = store.clone();
+
+            updated.set_addon_enabled(&space_id, &addon_id, enabled)?;
+            updated.validate_and_repair()?;
+            save_space_store(&updated)?;
+
+            *store = updated;
+
+            let response = store.space_addons(&space_id)?;
 
             Ok(serde_json::to_string(&ok(response))?)
         }
