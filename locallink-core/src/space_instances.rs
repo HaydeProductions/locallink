@@ -1,3 +1,5 @@
+use crate::config::space_runtime::{SpaceAddonInstancePlan, SpaceAddonSyncPlan};
+use crate::config::spaces::SpaceKind;
 use std::collections::HashSet;
 
 #[path = "space_instance_state.rs"]
@@ -26,8 +28,8 @@ impl SpaceAddonInstanceSet {
     }
 
     pub fn mark_present(&mut self, instance_id: impl Into<String>) -> bool {
-        let instance_id = instance_id.into();
-        if instance_id.trim().is_empty() {
+        let instance_id = instance_id.into().trim().to_string();
+        if instance_id.is_empty() {
             return false;
         }
 
@@ -36,6 +38,16 @@ impl SpaceAddonInstanceSet {
 
     pub fn mark_absent(&mut self, instance_id: &str) -> bool {
         self.instance_ids.remove(instance_id)
+    }
+
+    pub fn apply_sync_plan(&mut self, sync_plan: &SpaceAddonSyncPlan) {
+        for instance_id in &sync_plan.stop {
+            self.mark_absent(instance_id);
+        }
+
+        for plan in sync_plan.start.iter().chain(sync_plan.keep.iter()) {
+            self.mark_present(plan.instance_id.clone());
+        }
     }
 
     pub fn replace<I>(&mut self, instance_ids: I)
@@ -64,6 +76,19 @@ impl SpaceAddonInstanceSet {
 mod tests {
     use super::*;
 
+    fn plan(instance_id: &str) -> SpaceAddonInstancePlan {
+        SpaceAddonInstancePlan {
+            instance_id: instance_id.to_string(),
+            space_id: "office".to_string(),
+            space_name: "Office".to_string(),
+            space_kind: SpaceKind::Group,
+            addon_id: "clipboard".to_string(),
+            addon_name: "Clipboard".to_string(),
+            executable: "clipboard.exe".to_string(),
+            connected_members: Vec::new(),
+        }
+    }
+
     #[test]
     fn new_set_is_empty() {
         let set = SpaceAddonInstanceSet::new();
@@ -84,12 +109,55 @@ mod tests {
     }
 
     #[test]
+    fn mark_present_trims_instance_ids() {
+        let mut set = SpaceAddonInstanceSet::new();
+
+        assert!(set.mark_present(" office:clipboard "));
+
+        assert!(set.contains("office:clipboard"));
+        assert!(!set.contains(" office:clipboard "));
+    }
+
+    #[test]
     fn mark_absent_removes_instance_ids() {
         let mut set = SpaceAddonInstanceSet::new();
         set.mark_present("office:clipboard");
 
         assert!(set.mark_absent("office:clipboard"));
         assert!(!set.contains("office:clipboard"));
+    }
+
+    #[test]
+    fn apply_sync_plan_marks_started_and_kept_instances_present() {
+        let mut set = SpaceAddonInstanceSet::new();
+        let sync_plan = SpaceAddonSyncPlan {
+            start: vec![plan("office:clipboard")],
+            keep: vec![plan("office:files")],
+            stop: Vec::new(),
+        };
+
+        set.apply_sync_plan(&sync_plan);
+
+        assert_eq!(
+            set.sorted_ids(),
+            vec!["office:clipboard".to_string(), "office:files".to_string()]
+        );
+    }
+
+    #[test]
+    fn apply_sync_plan_removes_stopped_instances() {
+        let mut set = SpaceAddonInstanceSet::new();
+        set.mark_present("office:clipboard");
+        set.mark_present("office:files");
+        let sync_plan = SpaceAddonSyncPlan {
+            start: Vec::new(),
+            keep: vec![plan("office:clipboard")],
+            stop: vec!["office:files".to_string()],
+        };
+
+        set.apply_sync_plan(&sync_plan);
+
+        assert_eq!(set.sorted_ids(), vec!["office:clipboard".to_string()]);
     }
 
     #[test]
