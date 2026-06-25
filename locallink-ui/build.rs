@@ -279,7 +279,7 @@ impl LocalLinkUi {
         page_title(
             ui,
             "Spaces",
-            "Connection spaces group devices and control per-space add-on state.",
+            "Owned spaces and joined spaces are separate. Pending invitations must be accepted before they can connect.",
         );
 
         ui.add_space(14.0);
@@ -295,9 +295,9 @@ impl LocalLinkUi {
         }
 
         glass_panel(ui, |ui| {
-            ui.heading(egui::RichText::new("Create space").color(color_text()));
+            ui.heading(egui::RichText::new("Create owned space").color(color_text()));
             ui.label(
-                egui::RichText::new("Create a direct or group connection space owned by Core.")
+                egui::RichText::new("Spaces created here are owned by this device. Only owned spaces can invite or remove members.")
                     .color(color_muted()),
             );
 
@@ -328,7 +328,7 @@ impl LocalLinkUi {
             ui.add_space(8.0);
 
             if ui
-                .add(primary_button("Create Space"))
+                .add(primary_button("Create Owned Space"))
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .clicked()
             {
@@ -348,7 +348,7 @@ impl LocalLinkUi {
             notice(
                 ui,
                 "No spaces yet",
-                "Create a space above, then send an invite to a discovered or trusted device.",
+                "Create an owned space above, or wait for a space invite from another device.",
                 color_warning(),
             );
             return;
@@ -381,55 +381,117 @@ impl LocalLinkUi {
                                 format!("{} members", space.members.len())
                             };
 
+                            let owner_summary = if space.role == "owner" {
+                                "Owned by this device".to_string()
+                            } else if space.owner_device_id.is_empty() {
+                                "Joined foreign space".to_string()
+                            } else {
+                                format!("Owner: {}", ellipsize(&space.owner_device_id, 30))
+                            };
+
                             ui.label(
-                                egui::RichText::new(member_summary)
+                                egui::RichText::new(format!("{} · {}", member_summary, owner_summary))
                                     .color(color_muted())
                                     .size(14.0),
                             );
                         });
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                            let kind_color = if space.kind == "group" {
-                                color_accent()
-                            } else {
-                                color_success()
+                            let state_color = match space.local_state.as_str() {
+                                "owned" => color_accent(),
+                                "joined" => color_success(),
+                                "invite_pending" => color_warning(),
+                                "removed" | "left" => color_error(),
+                                _ => color_muted(),
                             };
-                            state_chip(ui, &space.kind, kind_color);
-                            let active_color = if space.active { color_success() } else { color_muted() };
-                            let active_label = if space.active { "Active" } else { "Inactive" };
-                            state_chip(ui, active_label, active_color);
+                            let state_label = match space.local_state.as_str() {
+                                "owned" => "Owned",
+                                "joined" => "Joined",
+                                "invite_pending" => "Invite pending",
+                                "invite_declined" => "Invite declined",
+                                "removed" => "Removed",
+                                "left" => "Left",
+                                _ => "Unknown",
+                            };
+                            state_chip(ui, state_label, state_color);
+                            state_chip(ui, &space.kind, if space.kind == "group" { color_accent() } else { color_success() });
+                            state_chip(ui, if space.active { "Active" } else { "Inactive" }, if space.active { color_success() } else { color_muted() });
                         });
                     });
 
                     ui.add_space(12.0);
 
+                    if space.local_state == "invite_pending" {
+                        notice(
+                            ui,
+                            "Invitation pending",
+                            "This is a foreign space invite. Accept it to join, or decline it. Connecting does not accept invites automatically.",
+                            color_warning(),
+                        );
+                        ui.add_space(8.0);
+                    } else if space.local_state == "removed" {
+                        notice(
+                            ui,
+                            "Removed from space",
+                            "The owner removed this device from the group. The space has been disconnected locally.",
+                            color_error(),
+                        );
+                        ui.add_space(8.0);
+                    } else if space.local_state == "left" {
+                        notice(
+                            ui,
+                            "Left space",
+                            "This device has left the foreign space. Create or accept a new invite to join again.",
+                            color_muted(),
+                        );
+                        ui.add_space(8.0);
+                    }
+
                     ui.horizontal_wrapped(|ui| {
-                        if space.active {
-                            if ui
-                                .add(danger_button("Disconnect Space"))
-                                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                                .clicked()
-                            {
-                                self.send_job(ApiJob::DeactivateSpace {
-                                    space_id: space.id.clone(),
-                                });
-                            }
-                        } else if ui
+                        if space.can_accept_invite && ui
+                            .add(primary_button("Accept Invite"))
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                        {
+                            self.send_job(ApiJob::AcceptSpaceInvite { space_id: space.id.clone() });
+                        }
+
+                        if space.can_decline_invite && ui
+                            .add(danger_button("Decline Invite"))
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                        {
+                            self.send_job(ApiJob::DeclineSpaceInvite { space_id: space.id.clone() });
+                        }
+
+                        if space.can_disconnect && ui
+                            .add(danger_button("Disconnect Space"))
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                        {
+                            self.send_job(ApiJob::DeactivateSpace { space_id: space.id.clone() });
+                        }
+
+                        if space.can_connect && ui
                             .add(primary_button("Connect Space"))
                             .on_hover_cursor(egui::CursorIcon::PointingHand)
                             .clicked()
                         {
-                            self.send_job(ApiJob::ActivateSpace {
-                                space_id: space.id.clone(),
-                            });
+                            self.send_job(ApiJob::ActivateSpace { space_id: space.id.clone() });
+                        }
+
+                        if space.can_leave && ui
+                            .add(danger_button("Leave Group"))
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                        {
+                            self.send_job(ApiJob::LeaveSpace { space_id: space.id.clone() });
                         }
 
                         ui.label(
-                            egui::RichText::new(
-                                "Space connection controls local activity only; device connections stay separate.",
-                            )
-                            .color(color_muted())
-                            .size(12.5),
+                            egui::RichText::new("Disconnect only affects local activity. Leave exits a foreign group.")
+                                .color(color_muted())
+                                .size(12.5),
                         );
                     });
 
@@ -454,7 +516,7 @@ impl LocalLinkUi {
 
                                     ui.label(
                                         egui::RichText::new(format!(
-                                            "{} configured desired state(s). Toggle controls are next.",
+                                            "{} configured desired state(s).",
                                             space.addon_count
                                         ))
                                         .color(color_muted())
@@ -465,7 +527,11 @@ impl LocalLinkUi {
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
-                                        state_chip(ui, "Configured", color_muted());
+                                        if space.can_manage_addons {
+                                            state_chip(ui, "Owner managed", color_success());
+                                        } else {
+                                            state_chip(ui, "Owner controlled", color_muted());
+                                        }
                                     },
                                 );
                             });
@@ -483,7 +549,7 @@ impl LocalLinkUi {
                                 ui.horizontal_wrapped(|ui| {
                                     mono_line(ui, "Peer", &ellipsize(member, 42));
 
-                                    if ui
+                                    if space.can_remove_members && member != &space.owner_device_id && ui
                                         .add(danger_button("Remove"))
                                         .on_hover_cursor(egui::CursorIcon::PointingHand)
                                         .clicked()
@@ -498,6 +564,14 @@ impl LocalLinkUi {
                         }
 
                         ui.separator();
+
+                        if !space.can_invite_members {
+                            ui.label(
+                                egui::RichText::new("This is a foreign space. Only the owner can invite or remove members.")
+                                    .color(color_muted()),
+                            );
+                            return;
+                        }
 
                         if device_candidates.is_empty() {
                             ui.label(
@@ -567,6 +641,9 @@ impl LocalLinkUi {
                         ui.separator();
                         mono_line(ui, "Space ID", &ellipsize(&space.id, 60));
                         mono_line(ui, "Kind", &space.kind);
+                        mono_line(ui, "Role", &space.role);
+                        mono_line(ui, "State", &space.local_state);
+                        mono_line(ui, "Owner", &space.owner_device_id);
                         mono_line(ui, "Active", if space.active { "true" } else { "false" });
                         mono_line(ui, "Add-ons", &space.addon_count.to_string());
                     }
