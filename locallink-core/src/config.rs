@@ -11,6 +11,9 @@ use uuid::Uuid;
 #[path = "spaces.rs"]
 pub mod spaces;
 
+#[path = "space_membership.rs"]
+pub mod space_membership;
+
 #[path = "core_state.rs"]
 pub mod core_state;
 
@@ -218,6 +221,7 @@ pub fn acquire_single_instance_lock() -> Result<File> {
 pub fn load_or_create_config() -> Result<Config> {
     init_app_dirs()?;
     let _spaces = spaces::load_or_create_space_store()?;
+    let _space_membership = space_membership::load_or_create_space_membership_store()?;
 
     let path = config_path()?;
 

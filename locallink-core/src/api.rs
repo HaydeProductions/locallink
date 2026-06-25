@@ -1,4 +1,7 @@
 use crate::addons::{load_addon_manifests, AddonRecord};
+use crate::config::space_membership::{
+    load_or_create_space_membership_store, save_space_membership_store, ImportedSpaceInvite,
+};
 use crate::config::spaces::{save_space_store, SpaceKind, SpaceRecord, SpaceRegistry};
 use crate::config::{
     add_trusted_device, app_paths, load_trusted_devices, mac_is_trusted, normalize_mac,
@@ -69,6 +72,24 @@ struct ApiRequest {
 
     #[serde(default)]
     enabled: Option<bool>,
+
+    #[serde(default)]
+    owner_device_id: Option<String>,
+
+    #[serde(default)]
+    invite_id: Option<String>,
+
+    #[serde(default)]
+    revision: Option<u64>,
+
+    #[serde(default)]
+    owner_enabled: Option<bool>,
+
+    #[serde(default)]
+    key_epoch: Option<u64>,
+
+    #[serde(default)]
+    members: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -321,6 +342,13 @@ async fn handle_request(
                     "create_space",
                     "add_space_member",
                     "remove_space_member",
+                    "list_space_invites",
+                    "invite_space_member",
+                    "import_space_invite",
+                    "accept_space_invite",
+                    "decline_space_invite",
+                    "leave_space",
+                    "record_space_member_acceptance",
                     "activate_space",
                     "deactivate_space",
                     "connect_space",
@@ -500,6 +528,142 @@ async fn handle_request(
                 .ok_or_else(|| anyhow::anyhow!("unknown space after update: {}", space_id))?;
 
             Ok(serde_json::to_string(&ok(response))?)
+        }
+
+        "list_space_invites" => {
+            let store = spaces.lock().await;
+            let membership = load_or_create_space_membership_store()?;
+            let response = membership.pending_joined_invites(&store);
+            Ok(serde_json::to_string(&ok(response))?)
+        }
+
+        "invite_space_member" => {
+            let space_id = req
+                .space_id
+                .ok_or_else(|| anyhow::anyhow!("invite_space_member requires space_id"))?;
+            let peer_id = req
+                .peer_id
+                .ok_or_else(|| anyhow::anyhow!("invite_space_member requires peer_id"))?;
+
+            let store = spaces.lock().await;
+            let mut membership = load_or_create_space_membership_store()?;
+            membership.ensure_owned_space(&store, &space_id, &cfg.device_id)?;
+            let invite = membership.create_invite(&store, &cfg.device_id, &space_id, &peer_id)?;
+            let update = membership.sync_update(&store, &cfg.device_id, &space_id)?;
+            save_space_membership_store(&membership)?;
+
+            Ok(serde_json::to_string(&ok(serde_json::json!({
+                "invite": invite,
+                "space_update": update
+            })))?)
+        }
+
+        "import_space_invite" => {
+            let space_id = req
+                .space_id
+                .ok_or_else(|| anyhow::anyhow!("import_space_invite requires space_id"))?;
+            let name = req
+                .name
+                .ok_or_else(|| anyhow::anyhow!("import_space_invite requires name"))?;
+            let kind = req.kind.unwrap_or(SpaceKind::Group);
+            let owner_device_id = req
+                .owner_device_id
+                .ok_or_else(|| anyhow::anyhow!("import_space_invite requires owner_device_id"))?;
+            let invite_id = req
+                .invite_id
+                .ok_or_else(|| anyhow::anyhow!("import_space_invite requires invite_id"))?;
+
+            let mut store = spaces.lock().await;
+            let mut membership = load_or_create_space_membership_store()?;
+            let response = membership.import_invite(
+                &mut store,
+                &cfg.device_id,
+                ImportedSpaceInvite {
+                    space_id,
+                    name,
+                    kind,
+                    owner_device_id,
+                    invite_id,
+                    revision: req.revision.unwrap_or(1),
+                    owner_enabled: req.owner_enabled.unwrap_or(true),
+                    members: req.members.unwrap_or_default(),
+                    key_epoch: req.key_epoch.unwrap_or(1),
+                },
+            )?;
+            membership.validate_and_repair(&mut store)?;
+            save_space_store(&store)?;
+            save_space_membership_store(&membership)?;
+
+            Ok(serde_json::to_string(&ok(response))?)
+        }
+
+        "accept_space_invite" => {
+            let space_id = req
+                .space_id
+                .ok_or_else(|| anyhow::anyhow!("accept_space_invite requires space_id"))?;
+
+            let mut store = spaces.lock().await;
+            let mut membership = load_or_create_space_membership_store()?;
+            let response = membership.accept_invite(&mut store, &cfg.device_id, &space_id)?;
+            membership.validate_and_repair(&mut store)?;
+            save_space_store(&store)?;
+            save_space_membership_store(&membership)?;
+
+            Ok(serde_json::to_string(&ok(response))?)
+        }
+
+        "decline_space_invite" => {
+            let space_id = req
+                .space_id
+                .ok_or_else(|| anyhow::anyhow!("decline_space_invite requires space_id"))?;
+
+            let mut store = spaces.lock().await;
+            let mut membership = load_or_create_space_membership_store()?;
+            let response = membership.decline_invite(&mut store, &space_id)?;
+            membership.validate_and_repair(&mut store)?;
+            save_space_store(&store)?;
+            save_space_membership_store(&membership)?;
+
+            Ok(serde_json::to_string(&ok(response))?)
+        }
+
+        "leave_space" => {
+            let space_id = req
+                .space_id
+                .ok_or_else(|| anyhow::anyhow!("leave_space requires space_id"))?;
+
+            let mut store = spaces.lock().await;
+            let mut membership = load_or_create_space_membership_store()?;
+            let response = membership.leave_space(&mut store, &cfg.device_id, &space_id)?;
+            membership.validate_and_repair(&mut store)?;
+            save_space_store(&store)?;
+            save_space_membership_store(&membership)?;
+
+            Ok(serde_json::to_string(&ok(response))?)
+        }
+
+        "record_space_member_acceptance" => {
+            let space_id = req.space_id.ok_or_else(|| {
+                anyhow::anyhow!("record_space_member_acceptance requires space_id")
+            })?;
+            let peer_id = req.peer_id.ok_or_else(|| {
+                anyhow::anyhow!("record_space_member_acceptance requires peer_id")
+            })?;
+
+            let mut store = spaces.lock().await;
+            let mut membership = load_or_create_space_membership_store()?;
+            membership.ensure_owned_space(&store, &space_id, &cfg.device_id)?;
+            let update = membership.record_member_acceptance(
+                &mut store,
+                &cfg.device_id,
+                &space_id,
+                &peer_id,
+            )?;
+            membership.validate_and_repair(&mut store)?;
+            save_space_store(&store)?;
+            save_space_membership_store(&membership)?;
+
+            Ok(serde_json::to_string(&ok(update))?)
         }
 
         "send_space_message" => {
