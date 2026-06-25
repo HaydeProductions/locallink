@@ -3,6 +3,9 @@ use std::collections::HashSet;
 #[path = "space_instance_state.rs"]
 pub mod space_instance_state;
 
+#[path = "space_core_plan.rs"]
+pub mod space_core_plan;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SpaceAddonInstanceSet {
     instance_ids: HashSet<String>,
