@@ -1,0 +1,158 @@
+use crate::addons::AddonRecord;
+use crate::config::spaces::{SpaceKind, SpaceStore};
+use serde::Serialize;
+use std::collections::{HashMap, HashSet};
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SpaceAddonInstancePlan {
+    pub instance_id: String,
+    pub space_id: String,
+    pub space_name: String,
+    pub space_kind: SpaceKind,
+    pub addon_id: String,
+    pub addon_name: String,
+    pub executable: String,
+    pub connected_members: Vec<String>,
+}
+
+pub fn plan_space_addon_instances(
+    store: &SpaceStore,
+    addons: &[AddonRecord],
+    connected_peer_ids: &HashSet<String>,
+) -> Vec<SpaceAddonInstancePlan> {
+    let addons_by_id: HashMap<&str, &AddonRecord> = addons
+        .iter()
+        .map(|addon| (addon.id.as_str(), addon))
+        .collect();
+
+    let mut plans = Vec::new();
+
+    for activation in store.activation_states(connected_peer_ids) {
+        if !activation.active {
+            continue;
+        }
+
+        let Some(space) = store
+            .spaces
+            .iter()
+            .find(|space| space.space_id == activation.space_id)
+        else {
+            continue;
+        };
+
+        let mut desired_addons: Vec<_> = space.addons.iter().collect();
+        desired_addons.sort_by(|(left, _), (right, _)| left.cmp(right));
+
+        for (addon_id, desired_state) in desired_addons {
+            if !desired_state.enabled {
+                continue;
+            }
+
+            let Some(addon) = addons_by_id.get(addon_id.as_str()) else {
+                continue;
+            };
+
+            plans.push(SpaceAddonInstancePlan {
+                instance_id: format!("{}:{}", space.space_id, addon.id),
+                space_id: space.space_id.clone(),
+                space_name: space.name.clone(),
+                space_kind: space.kind.clone(),
+                addon_id: addon.id.clone(),
+                addon_name: addon.name.clone(),
+                executable: addon.executable.clone(),
+                connected_members: activation.connected_members.clone(),
+            });
+        }
+    }
+
+    plans.sort_by(|left, right| {
+        left.space_id
+            .cmp(&right.space_id)
+            .then(left.addon_id.cmp(&right.addon_id))
+    });
+    plans
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::spaces::{SpaceAddonState, SpaceRecord};
+
+    fn addon(id: &str) -> AddonRecord {
+        AddonRecord {
+            id: id.to_string(),
+            name: format!("{id} add-on"),
+            version: "1.0.0".to_string(),
+            description: String::new(),
+            executable: format!("{id}.exe"),
+            services: Vec::new(),
+            enabled: false,
+            manifest_path: format!("addons/{id}/manifest.json"),
+            addon_dir: format!("addons/{id}"),
+        }
+    }
+
+    fn store_with_space(kind: SpaceKind, members: Vec<&str>) -> SpaceStore {
+        let mut addons = HashMap::new();
+        addons.insert("clipboard".to_string(), SpaceAddonState { enabled: true });
+
+        SpaceStore {
+            spaces: vec![SpaceRecord {
+                space_id: "office".to_string(),
+                name: "Office".to_string(),
+                kind,
+                members: members.into_iter().map(str::to_string).collect(),
+                addons,
+            }],
+        }
+    }
+
+    #[test]
+    fn plans_enabled_addons_for_active_spaces() {
+        let store = store_with_space(SpaceKind::Group, vec!["desktop", "laptop"]);
+        let addons = vec![addon("clipboard")];
+        let connected = HashSet::from(["desktop".to_string()]);
+
+        let plans = plan_space_addon_instances(&store, &addons, &connected);
+
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].instance_id, "office:clipboard");
+        assert_eq!(plans[0].connected_members, vec!["desktop".to_string()]);
+    }
+
+    #[test]
+    fn skips_inactive_spaces() {
+        let store = store_with_space(SpaceKind::Direct, vec!["desktop"]);
+        let addons = vec![addon("clipboard")];
+        let connected = HashSet::new();
+
+        let plans = plan_space_addon_instances(&store, &addons, &connected);
+
+        assert!(plans.is_empty());
+    }
+
+    #[test]
+    fn skips_disabled_desired_addons() {
+        let mut store = store_with_space(SpaceKind::Group, vec!["desktop"]);
+        store
+            .set_addon_enabled("office", "clipboard", false)
+            .unwrap();
+        let addons = vec![addon("clipboard")];
+        let connected = HashSet::from(["desktop".to_string()]);
+
+        let plans = plan_space_addon_instances(&store, &addons, &connected);
+
+        assert!(plans.is_empty());
+    }
+
+    #[test]
+    fn skips_missing_addon_manifests() {
+        let store = store_with_space(SpaceKind::Group, vec!["desktop"]);
+        let addons = Vec::new();
+        let connected = HashSet::from(["desktop".to_string()]);
+
+        let plans = plan_space_addon_instances(&store, &addons, &connected);
+
+        assert!(plans.is_empty());
+    }
+}
