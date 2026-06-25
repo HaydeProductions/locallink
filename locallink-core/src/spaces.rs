@@ -50,6 +50,12 @@ pub struct SpaceActivationState {
     pub missing_members: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SpaceAddonDesiredState {
+    pub addon_id: String,
+    pub enabled: bool,
+}
+
 pub type SpaceRegistry = Arc<Mutex<SpaceStore>>;
 
 pub fn new_space_registry(store: SpaceStore) -> SpaceRegistry {
@@ -129,6 +135,28 @@ impl SpaceStore {
             .ok_or_else(|| anyhow::anyhow!("unknown space: {}", space_id))?;
 
         Ok(space.addons.get(addon_id).cloned())
+    }
+
+    pub fn space_addons(&self, space_id: &str) -> Result<Vec<SpaceAddonDesiredState>> {
+        let space_id = space_id.trim();
+        anyhow::ensure!(!space_id.is_empty(), "space_id cannot be empty");
+
+        let space = self
+            .spaces
+            .iter()
+            .find(|space| space.space_id == space_id)
+            .ok_or_else(|| anyhow::anyhow!("unknown space: {}", space_id))?;
+
+        let mut addons: Vec<_> = space
+            .addons
+            .iter()
+            .map(|(addon_id, state)| SpaceAddonDesiredState {
+                addon_id: addon_id.clone(),
+                enabled: state.enabled,
+            })
+            .collect();
+        addons.sort_by(|left, right| left.addon_id.cmp(&right.addon_id));
+        Ok(addons)
     }
 
     pub fn activation_state(
@@ -388,6 +416,40 @@ mod tests {
         assert_eq!(
             store.addon_state("office", "clipboard").unwrap(),
             Some(SpaceAddonState { enabled: true })
+        );
+    }
+
+    #[test]
+    fn space_addons_are_returned_sorted_by_id() {
+        let mut store = SpaceStore {
+            spaces: vec![SpaceRecord {
+                space_id: "office".to_string(),
+                name: "Office".to_string(),
+                kind: SpaceKind::Group,
+                members: Vec::new(),
+                addons: HashMap::new(),
+            }],
+        };
+
+        store.set_addon_enabled("office", "files", false).unwrap();
+        store
+            .set_addon_enabled("office", "clipboard", true)
+            .unwrap();
+
+        let addons = store.space_addons("office").unwrap();
+
+        assert_eq!(
+            addons,
+            vec![
+                SpaceAddonDesiredState {
+                    addon_id: "clipboard".to_string(),
+                    enabled: true,
+                },
+                SpaceAddonDesiredState {
+                    addon_id: "files".to_string(),
+                    enabled: false,
+                },
+            ]
         );
     }
 
