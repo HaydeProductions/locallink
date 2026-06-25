@@ -1,5 +1,8 @@
 use std::collections::HashSet;
 
+#[path = "space_instance_state.rs"]
+pub mod space_instance_state;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SpaceAddonInstanceSet {
     instance_ids: HashSet<String>,
