@@ -6,9 +6,9 @@ mod discovery;
 mod protocol;
 mod transport;
 
-use addons::AddonRecord;
 use anyhow::Result;
-use config::core_state::load_core_runtime_state;
+use config::core_state::{load_core_runtime_state, CoreRuntimeState};
+use config::space_runtime::SpaceAddonRuntimeContext;
 use config::{
     acquire_single_instance_lock, config_path, generate_psk_b64, init_app_dirs,
     load_or_create_config, save_config, validate_psk_b64,
@@ -18,10 +18,8 @@ use std::collections::{HashMap, HashSet};
 use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration, Instant};
-use transport::{tcp_server, ConnectionRegistry, RunOptions};
+use transport::{tcp_server, RunOptions};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -122,10 +120,7 @@ async fn main() -> Result<()> {
         }
     });
 
-    start_addon_process_manager(
-        runtime_state.addons.clone(),
-        runtime_state.connections.clone(),
-    );
+    start_addon_process_manager(runtime_state.clone());
 
     let cfg_api = cfg.clone();
     let peers_api = runtime_state.peers.clone();
@@ -166,86 +161,133 @@ async fn main() -> Result<()> {
     .await
 }
 
-fn start_addon_process_manager(
-    addons: Arc<Mutex<Vec<AddonRecord>>>,
-    connections: ConnectionRegistry,
-) {
+fn start_addon_process_manager(state: CoreRuntimeState) {
     tokio::spawn(async move {
         let mut children = HashMap::<String, Child>::new();
-        let mut suppressed_until_next_connection = HashSet::<String>::new();
-        let mut had_connections = false;
+        let mut suppressed_until_space_change = HashSet::<String>::new();
 
         loop {
-            let has_connections = !connections.lock().await.is_empty();
+            let action_plan =
+                config::space_sync::plan_space_addon_actions_from_core_state(
+                    &state,
+                    api::LOCAL_API_ADDR,
+                )
+                .await;
 
-            if !has_connections {
-                if had_connections || !children.is_empty() {
-                    stop_all_addon_children(&mut children);
-                    eprintln!("Stopped add-ons because there are no active connections");
-                }
-
-                suppressed_until_next_connection.clear();
-                had_connections = false;
-                sleep(Duration::from_millis(250)).await;
-                continue;
-            }
-
-            if !had_connections {
-                suppressed_until_next_connection.clear();
-            }
-            had_connections = true;
-
-            let addon_snapshot = addons.lock().await.clone();
-
-            let wanted: HashMap<String, AddonRecord> = addon_snapshot
-                .into_iter()
-                .filter(|addon| addon.enabled)
-                .map(|addon| (addon.id.clone(), addon))
+            let wanted: HashSet<String> = action_plan
+                .start
+                .iter()
+                .map(|context| context.instance_id.clone())
+                .chain(action_plan.keep.iter().cloned())
                 .collect();
 
-            suppressed_until_next_connection.retain(|id| wanted.contains_key(id));
+            suppressed_until_space_change.retain(|id| wanted.contains(id));
+
+            for id in action_plan.stop {
+                suppressed_until_space_change.remove(&id);
+
+                if let Some(mut child) = children.remove(&id) {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    eprintln!("Stopped add-on: {id}");
+                }
+
+                state
+                    .space_addon_instances
+                    .lock()
+                    .await
+                    .mark_absent(&id);
+            }
 
             let running_ids: Vec<String> = children.keys().cloned().collect();
 
             for id in running_ids {
-                let exited = children
-                    .get_mut(&id)
-                    .and_then(|child| child.try_wait().ok())
-                    .is_some();
+                let exited = match children.get_mut(&id).map(|child| child.try_wait()) {
+                    Some(Ok(Some(_))) => true,
+                    Some(Ok(None)) => false,
+                    Some(Err(_)) => true,
+                    None => false,
+                };
 
                 if exited {
                     children.remove(&id);
-                    suppressed_until_next_connection.insert(id.clone());
+                    suppressed_until_space_change.insert(id.clone());
+                    state
+                        .space_addon_instances
+                        .lock()
+                        .await
+                        .mark_absent(&id);
+
                     eprintln!(
-                        "Add-on process exited: {id}. It will not be restarted until the next connection cycle."
+                        "Add-on process exited: {id}. It will not be restarted until its space state changes."
                     );
                     continue;
                 }
 
-                if !wanted.contains_key(&id) {
+                if !wanted.contains(&id) {
                     if let Some(mut child) = children.remove(&id) {
                         let _ = child.kill();
                         let _ = child.wait();
+
+                        state
+                            .space_addon_instances
+                            .lock()
+                            .await
+                            .mark_absent(&id);
+
                         eprintln!("Stopped add-on: {id}");
                     }
                 }
             }
 
-            for (id, addon) in wanted {
-                if children.contains_key(&id) || suppressed_until_next_connection.contains(&id) {
+            for id in action_plan.keep {
+                if children.contains_key(&id) {
+                    state
+                        .space_addon_instances
+                        .lock()
+                        .await
+                        .mark_present(id);
+                } else {
+                    state
+                        .space_addon_instances
+                        .lock()
+                        .await
+                        .mark_absent(&id);
+                }
+            }
+
+            for context in action_plan.start {
+                let id = context.instance_id.clone();
+
+                if children.contains_key(&id)
+                    || suppressed_until_space_change.contains(&id)
+                {
                     continue;
                 }
 
-                match launch_core_owned_addon(&addon) {
+                match launch_core_owned_addon(&context) {
                     Ok(child) => {
-                        eprintln!("Started add-on: {}", addon.name);
+                        eprintln!("Started add-on: {id}");
+
+                        state
+                            .space_addon_instances
+                            .lock()
+                            .await
+                            .mark_present(id.clone());
+
                         children.insert(id, child);
                     }
                     Err(err) => {
-                        suppressed_until_next_connection.insert(id);
+                        state
+                            .space_addon_instances
+                            .lock()
+                            .await
+                            .mark_absent(&id);
+
+                        suppressed_until_space_change.insert(id.clone());
+
                         eprintln!(
-                            "Could not start add-on {}: {err}. It will not be retried until the next connection cycle.",
-                            addon.name
+                            "Could not start add-on {id}: {err}. It will not be retried until its space state changes."
                         );
                     }
                 }
@@ -256,24 +298,21 @@ fn start_addon_process_manager(
     });
 }
 
-fn stop_all_addon_children(children: &mut HashMap<String, Child>) {
-    for (id, mut child) in children.drain() {
-        let _ = child.kill();
-        let _ = child.wait();
-        eprintln!("Stopped add-on: {id}");
-    }
-}
-
-fn launch_core_owned_addon(addon: &AddonRecord) -> Result<Child> {
-    let exe_path = Path::new(&addon.addon_dir).join(&addon.executable);
+fn launch_core_owned_addon(context: &SpaceAddonRuntimeContext) -> Result<Child> {
+    let exe_path = Path::new(&context.executable);
 
     if !exe_path.exists() {
         anyhow::bail!("add-on executable not found: {}", exe_path.display());
     }
 
-    let mut command = Command::new(&exe_path);
+    let mut command = Command::new(exe_path);
+
+    if let Some(addon_dir) = exe_path.parent() {
+        command.current_dir(addon_dir);
+    }
+
     command
-        .current_dir(Path::new(&addon.addon_dir))
+        .envs(&context.env)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
