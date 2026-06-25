@@ -310,7 +310,12 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn space_record(space_id: &str, name: &str, kind: SpaceKind, members: Vec<&str>) -> SpaceRecord {
+    fn space_record(
+        space_id: &str,
+        name: &str,
+        kind: SpaceKind,
+        members: Vec<&str>,
+    ) -> SpaceRecord {
         SpaceRecord {
             space_id: space_id.to_string(),
             name: name.to_string(),
@@ -411,7 +416,12 @@ mod tests {
     #[test]
     fn set_space_active_records_local_activation() {
         let mut store = SpaceStore {
-            spaces: vec![space_record("office", "Office", SpaceKind::Group, Vec::new())],
+            spaces: vec![space_record(
+                "office",
+                "Office",
+                SpaceKind::Group,
+                Vec::new(),
+            )],
         };
 
         let active = store.set_space_active("office", true).unwrap();
@@ -446,7 +456,12 @@ mod tests {
     #[test]
     fn set_addon_enabled_records_space_desired_state() {
         let mut store = SpaceStore {
-            spaces: vec![space_record("office", "Office", SpaceKind::Group, Vec::new())],
+            spaces: vec![space_record(
+                "office",
+                "Office",
+                SpaceKind::Group,
+                Vec::new(),
+            )],
         };
 
         let state = store

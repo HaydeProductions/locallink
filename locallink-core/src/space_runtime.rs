@@ -44,9 +44,15 @@ impl SpaceAddonInstancePlan {
             "LOCALLINK_ADDON_INSTANCE_ID".to_string(),
             self.instance_id.clone(),
         );
-        env.insert("LOCALLINK_CORE_API_ADDR".to_string(), core_api_addr.to_string());
+        env.insert(
+            "LOCALLINK_CORE_API_ADDR".to_string(),
+            core_api_addr.to_string(),
+        );
         env.insert("LOCALLINK_SPACE_ID".to_string(), self.space_id.clone());
-        env.insert("LOCALLINK_SPACE_KIND".to_string(), space_kind_env(&self.space_kind));
+        env.insert(
+            "LOCALLINK_SPACE_KIND".to_string(),
+            space_kind_env(&self.space_kind),
+        );
         env.insert("LOCALLINK_SPACE_NAME".to_string(), self.space_name.clone());
         env.insert(
             "LOCALLINK_CONNECTED_MEMBERS".to_string(),
@@ -380,7 +386,10 @@ mod tests {
 
         assert_eq!(actions.start.len(), 1);
         assert_eq!(actions.start[0].instance_id, "office:clipboard");
-        assert_eq!(actions.start[0].executable, "addons/clipboard/clipboard.exe");
+        assert_eq!(
+            actions.start[0].executable,
+            "addons/clipboard/clipboard.exe"
+        );
         assert!(actions.keep.is_empty());
         assert_eq!(actions.stop, vec!["office:old".to_string()]);
         assert!(!actions.is_empty());

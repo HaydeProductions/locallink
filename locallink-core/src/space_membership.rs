@@ -1,5 +1,5 @@
-use crate::config::{init_app_dirs, state_dir};
 use crate::config::spaces::{SpaceKind, SpaceRecord, SpaceStore};
+use crate::config::{init_app_dirs, state_dir};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -166,11 +166,16 @@ impl SpaceMembershipStore {
         Ok(())
     }
 
-    pub fn ensure_owned_space(&mut self, spaces: &SpaceStore, space_id: &str, owner_device_id: &str) -> Result<()> {
+    pub fn ensure_owned_space(
+        &mut self,
+        spaces: &SpaceStore,
+        space_id: &str,
+        owner_device_id: &str,
+    ) -> Result<()> {
         ensure_space_exists(spaces, space_id)?;
-        self.records
-            .entry(space_id.to_string())
-            .or_insert_with(|| SpaceMembershipRecord::owner(space_id.to_string(), owner_device_id.to_string()));
+        self.records.entry(space_id.to_string()).or_insert_with(|| {
+            SpaceMembershipRecord::owner(space_id.to_string(), owner_device_id.to_string())
+        });
         Ok(())
     }
 
@@ -237,9 +242,15 @@ impl SpaceMembershipStore {
         local_device_id: &str,
         invite: ImportedSpaceInvite,
     ) -> Result<SpaceRecord> {
-        anyhow::ensure!(invite.owner_device_id != local_device_id, "cannot import own space invite");
         anyhow::ensure!(
-            !spaces.spaces.iter().any(|space| space.space_id == invite.space_id),
+            invite.owner_device_id != local_device_id,
+            "cannot import own space invite"
+        );
+        anyhow::ensure!(
+            !spaces
+                .spaces
+                .iter()
+                .any(|space| space.space_id == invite.space_id),
             "space already exists locally: {}",
             invite.space_id
         );
@@ -271,13 +282,23 @@ impl SpaceMembershipStore {
         space_id: &str,
     ) -> Result<SpaceRecord> {
         let record = self.record_mut(space_id)?;
-        anyhow::ensure!(record.role == SpaceRole::Member, "only joined spaces can accept invites");
-        anyhow::ensure!(!record.left, "space has already been left locally: {}", space_id);
+        anyhow::ensure!(
+            record.role == SpaceRole::Member,
+            "only joined spaces can accept invites"
+        );
+        anyhow::ensure!(
+            !record.left,
+            "space has already been left locally: {}",
+            space_id
+        );
         let invite = record
             .invite_state
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("space has no invite state: {}", space_id))?;
-        anyhow::ensure!(invite.status == SpaceInviteStatus::Pending, "invite is not pending");
+        anyhow::ensure!(
+            invite.status == SpaceInviteStatus::Pending,
+            "invite is not pending"
+        );
         invite.status = SpaceInviteStatus::Accepted;
 
         let space = space_mut(spaces, space_id)?;
@@ -288,9 +309,16 @@ impl SpaceMembershipStore {
         Ok(space.clone())
     }
 
-    pub fn decline_invite(&mut self, spaces: &mut SpaceStore, space_id: &str) -> Result<SpaceRecord> {
+    pub fn decline_invite(
+        &mut self,
+        spaces: &mut SpaceStore,
+        space_id: &str,
+    ) -> Result<SpaceRecord> {
         let record = self.record_mut(space_id)?;
-        anyhow::ensure!(record.role == SpaceRole::Member, "only joined spaces can decline invites");
+        anyhow::ensure!(
+            record.role == SpaceRole::Member,
+            "only joined spaces can decline invites"
+        );
         if let Some(invite) = record.invite_state.as_mut() {
             invite.status = SpaceInviteStatus::Declined;
         }
@@ -357,8 +385,14 @@ impl SpaceMembershipStore {
         update: SpaceSyncUpdate,
     ) -> Result<Option<SpaceRecord>> {
         let record = self.record_mut(&update.space_id)?;
-        anyhow::ensure!(record.role == SpaceRole::Member, "only joined spaces apply owner updates");
-        anyhow::ensure!(record.owner_device_id == update.owner_device_id, "owner mismatch");
+        anyhow::ensure!(
+            record.role == SpaceRole::Member,
+            "only joined spaces apply owner updates"
+        );
+        anyhow::ensure!(
+            record.owner_device_id == update.owner_device_id,
+            "owner mismatch"
+        );
         if record.left || update.revision <= record.revision {
             return Ok(None);
         }
@@ -387,7 +421,12 @@ impl SpaceMembershipStore {
             .collect()
     }
 
-    pub fn sync_update(&self, spaces: &SpaceStore, local_device_id: &str, space_id: &str) -> Result<SpaceSyncUpdate> {
+    pub fn sync_update(
+        &self,
+        spaces: &SpaceStore,
+        local_device_id: &str,
+        space_id: &str,
+    ) -> Result<SpaceSyncUpdate> {
         self.ensure_owner(local_device_id, space_id)?;
         let space = ensure_space_exists(spaces, space_id)?;
         let record = self.record(space_id)?;
@@ -406,7 +445,10 @@ impl SpaceMembershipStore {
 
     fn ensure_owner(&self, local_device_id: &str, space_id: &str) -> Result<()> {
         let record = self.record(space_id)?;
-        anyhow::ensure!(record.is_owner_for(local_device_id), "only the owner can mutate owner-authoritative space state");
+        anyhow::ensure!(
+            record.is_owner_for(local_device_id),
+            "only the owner can mutate owner-authoritative space state"
+        );
         Ok(())
     }
 
@@ -476,9 +518,18 @@ fn normalize_invites(invites: &mut Vec<SpaceInviteRecord>) -> Result<()> {
         invite.target_peer_id = invite.target_peer_id.trim().to_string();
         invite.invited_by = invite.invited_by.trim().to_string();
         anyhow::ensure!(!invite.invite_id.is_empty(), "invite_id cannot be empty");
-        anyhow::ensure!(!invite.space_id.is_empty(), "invite space_id cannot be empty");
-        anyhow::ensure!(!invite.target_peer_id.is_empty(), "invite target_peer_id cannot be empty");
-        anyhow::ensure!(!invite.invited_by.is_empty(), "invite invited_by cannot be empty");
+        anyhow::ensure!(
+            !invite.space_id.is_empty(),
+            "invite space_id cannot be empty"
+        );
+        anyhow::ensure!(
+            !invite.target_peer_id.is_empty(),
+            "invite target_peer_id cannot be empty"
+        );
+        anyhow::ensure!(
+            !invite.invited_by.is_empty(),
+            "invite invited_by cannot be empty"
+        );
         if invite.revision == 0 {
             invite.revision = 1;
         }
@@ -528,7 +579,9 @@ mod tests {
     fn owner_invite_does_not_auto_add_member() {
         let spaces = spaces();
         let mut store = SpaceMembershipStore::default();
-        store.ensure_owned_space(&spaces, "office", "owner").unwrap();
+        store
+            .ensure_owned_space(&spaces, "office", "owner")
+            .unwrap();
 
         let invite = store
             .create_invite(&spaces, "owner", "office", "laptop")
@@ -543,7 +596,9 @@ mod tests {
     fn non_owner_cannot_invite() {
         let spaces = spaces();
         let mut store = SpaceMembershipStore::default();
-        store.ensure_owned_space(&spaces, "office", "owner").unwrap();
+        store
+            .ensure_owned_space(&spaces, "office", "owner")
+            .unwrap();
 
         assert!(store
             .create_invite(&spaces, "laptop", "office", "phone")
@@ -604,7 +659,9 @@ mod tests {
             )
             .unwrap();
 
-        let space = store.accept_invite(&mut spaces, "laptop", "office").unwrap();
+        let space = store
+            .accept_invite(&mut spaces, "laptop", "office")
+            .unwrap();
 
         assert!(space.members.iter().any(|member| member == "laptop"));
         assert_eq!(
@@ -621,7 +678,9 @@ mod tests {
     fn owner_records_acceptance_and_gets_update_snapshot() {
         let mut spaces = spaces();
         let mut store = SpaceMembershipStore::default();
-        store.ensure_owned_space(&spaces, "office", "owner").unwrap();
+        store
+            .ensure_owned_space(&spaces, "office", "owner")
+            .unwrap();
         store
             .create_invite(&spaces, "owner", "office", "laptop")
             .unwrap();
@@ -630,7 +689,10 @@ mod tests {
             .record_member_acceptance(&mut spaces, "owner", "office", "laptop")
             .unwrap();
 
-        assert!(spaces.spaces[0].members.iter().any(|member| member == "laptop"));
+        assert!(spaces.spaces[0]
+            .members
+            .iter()
+            .any(|member| member == "laptop"));
         assert_eq!(store.invites[0].status, SpaceInviteStatus::Accepted);
         assert_eq!(update.message_type, "space_update");
     }
@@ -656,11 +718,14 @@ mod tests {
                 },
             )
             .unwrap();
-        store.accept_invite(&mut spaces, "laptop", "office").unwrap();
+        store
+            .accept_invite(&mut spaces, "laptop", "office")
+            .unwrap();
         spaces.spaces[0].active = true;
-        spaces.spaces[0]
-            .addons
-            .insert("clipboard".to_string(), crate::config::spaces::SpaceAddonState { enabled: true });
+        spaces.spaces[0].addons.insert(
+            "clipboard".to_string(),
+            crate::config::spaces::SpaceAddonState { enabled: true },
+        );
 
         let space = store.leave_space(&mut spaces, "laptop", "office").unwrap();
         let record = store.records.get("office").unwrap();
