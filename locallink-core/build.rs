@@ -305,6 +305,31 @@ fn patch_api() {
             let mut store = spaces.lock().await;
             let mut membership = load_or_create_space_membership_store()?;
             membership.ensure_local_records(&store, &cfg.device_id);
+
+            let local_cleanup_allowed = membership
+                .records
+                .get(&space_id)
+                .map(|record| {
+                    !record.is_owner_for(&cfg.device_id)
+                        && (record.left || record.key_epoch == 0 || !record.owner_enabled)
+                })
+                .unwrap_or(false);
+
+            if local_cleanup_allowed {
+                let deleted_space = membership
+                    .purge_local_space(&mut store, &space_id)
+                    .ok_or_else(|| anyhow::anyhow!("unknown local space: {}", space_id))?;
+                membership.validate_and_repair(&mut store)?;
+                save_space_store(&store)?;
+                save_space_membership_store(&membership)?;
+
+                return Ok(serde_json::to_string(&ok(serde_json::json!({
+                    "space_id": space_id,
+                    "deleted_space": deleted_space,
+                    "deleted_local_only": true
+                })))?);
+            }
+
             let (deleted_space, update) =
                 membership.delete_owned_space(&mut store, &cfg.device_id, &space_id)?;
             let deliveries = broadcast_update(connections.clone(), update.clone(), None).await;
@@ -316,7 +341,8 @@ fn patch_api() {
                 "space_id": space_id,
                 "deleted_space": deleted_space,
                 "space_update": update,
-                "deliveries": deliveries
+                "deliveries": deliveries,
+                "deleted_local_only": false
             })))?)
         }
 
@@ -324,13 +350,6 @@ fn patch_api() {
 "#,
         );
     }
-
-    text = text.replace(
-        r#"            let response = membership.leave_space(&mut store, &cfg.device_id, &space_id)?;
-"#,
-        r#"            let response = membership.leave_space(&mut store, &cfg.device_id, &space_id)?;
-"#,
-    );
 
     if text != original {
         fs::write(path, text).expect("write patched api.rs");
