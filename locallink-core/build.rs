@@ -125,7 +125,11 @@ fn patch_membership() {
     );
 
     text = text.replace(
-        r#"        if removed_by_owner {
+        r#"        let space = space_mut(spaces, &update.space_id)?;
+        space.name = update.name;
+        space.kind = update.kind;
+        space.members = update.members;
+        if removed_by_owner {
             space.active = false;
             space.addons.clear();
         }
@@ -134,6 +138,11 @@ fn patch_membership() {
         r#"        if update.message_type == "space_purged" {
             return Ok(self.purge_local_space(spaces, &update.space_id));
         }
+
+        let space = space_mut(spaces, &update.space_id)?;
+        space.name = update.name;
+        space.kind = update.kind;
+        space.members = update.members;
         if removed_by_owner {
             space.active = false;
             space.addons.clear();
