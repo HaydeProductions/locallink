@@ -15,7 +15,18 @@ else
   git switch -c "$BRANCH" "origin/$BRANCH"
 fi
 
-python3 - <<'PY'
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="python3"
+elif command -v py >/dev/null 2>&1; then
+  PYTHON_BIN="py -3"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="python"
+else
+  echo "Python is required, but python3, py, and python were not found on PATH." >&2
+  exit 1
+fi
+
+$PYTHON_BIN - <<'PY'
 from pathlib import Path
 
 # Keep kicked/removed foreign spaces registered until the user explicitly trashes them.
