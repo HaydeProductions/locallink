@@ -14,6 +14,7 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     generated_ui_build::run();
     patch_spaces_page_scroll();
+    patch_spaces_delete_controls();
 }
 
 fn patch_spaces_page_scroll() {
@@ -57,6 +58,58 @@ fn patch_spaces_page_scroll() {
         &text[..close_at],
         close_repl,
         &text[close_at + close_pat.len()..]
+    );
+
+    if text != original {
+        fs::write(path, text).expect("write patched core-control UI source");
+    }
+}
+
+fn patch_spaces_delete_controls() {
+    let path = Path::new("src/core_control_main.rs");
+    let mut text = fs::read_to_string(path)
+        .expect("read generated core-control UI source")
+        .replace("\r\n", "\n");
+    let original = text.clone();
+
+    if !text.contains("DeleteSpace {") {
+        text = text.replace(
+            "    LeaveSpace {\n        space_id: String,\n    },\n    PollEvents {",
+            "    LeaveSpace {\n        space_id: String,\n    },\n    DeleteSpace {\n        space_id: String,\n    },\n    PollEvents {",
+        );
+    }
+
+    if !text.contains("ApiJob::DeleteSpace { space_id } => json!") {
+        text = text.replace(
+            "            ApiJob::LeaveSpace { space_id } => json!({\n                \"cmd\": \"leave_space\",\n                \"space_id\": space_id\n            }),",
+            "            ApiJob::LeaveSpace { space_id } => json!({\n                \"cmd\": \"leave_space\",\n                \"space_id\": space_id\n            }),\n            ApiJob::DeleteSpace { space_id } => json!({\n                \"cmd\": \"delete_space\",\n                \"space_id\": space_id\n            }),",
+        );
+    }
+
+    if !text.contains("ApiJob::DeleteSpace { .. } => \"delete_space\"") {
+        text = text.replace(
+            "        ApiJob::LeaveSpace { .. } => \"leave_space\",",
+            "        ApiJob::LeaveSpace { .. } => \"leave_space\",\n        ApiJob::DeleteSpace { .. } => \"delete_space\",",
+        );
+    }
+
+    if !text.contains("\"delete_space\" => {") {
+        text = text.replace(
+            "            \"leave_space\" => {\n                self.log(\"Left space.\");\n                self.send_job(ApiJob::Spaces);\n                self.send_job(ApiJob::Addons);\n            }",
+            "            \"leave_space\" => {\n                self.log(\"Left space.\");\n                self.send_job(ApiJob::Spaces);\n                self.send_job(ApiJob::Addons);\n            }\n            \"delete_space\" => {\n                self.log(\"Space deleted.\");\n                self.send_job(ApiJob::Spaces);\n                self.send_job(ApiJob::Addons);\n            }",
+        );
+    }
+
+    if !text.contains("Delete Space" ) {
+        text = text.replace(
+            "                        if space.can_leave && ui\n                            .add(danger_button(\"Leave Group\"))\n                            .on_hover_cursor(egui::CursorIcon::PointingHand)\n                            .clicked()\n                        {\n                            self.send_job(ApiJob::LeaveSpace { space_id: space.id.clone() });\n                        }",
+            "                        if space.can_leave && ui\n                            .add(danger_button(\"Leave Group\"))\n                            .on_hover_cursor(egui::CursorIcon::PointingHand)\n                            .clicked()\n                        {\n                            self.send_job(ApiJob::LeaveSpace { space_id: space.id.clone() });\n                        }\n\n                        if space.role == \"owner\" && ui\n                            .add(danger_button(\"Delete Space\"))\n                            .on_hover_cursor(egui::CursorIcon::PointingHand)\n                            .clicked()\n                        {\n                            self.send_job(ApiJob::DeleteSpace { space_id: space.id.clone() });\n                        }",
+        );
+    }
+
+    text = text.replace(
+        "Disconnect only affects local activity. Leave exits a foreign group.",
+        "Disconnect only affects local activity. Leave exits a foreign group. Delete removes an owned space for everyone.",
     );
 
     if text != original {
