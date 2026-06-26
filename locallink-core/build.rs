@@ -117,7 +117,10 @@ fn patch_membership() {
         }
         let record = self.record(space_id)?;
         anyhow::ensure!(record.role == SpaceRole::Member, "only joined spaces can be left");
-        let space = ensure_space_exists(spaces, space_id)?.clone();
+        let mut space = ensure_space_exists(spaces, space_id)?.clone();
+        space.active = false;
+        space.addons.clear();
+        space.members.retain(|member| member != local_device_id);
         self.purge_local_space(spaces, space_id);
         Ok(space)
     }
@@ -148,6 +151,26 @@ fn patch_membership() {
             space.addons.clear();
         }
         Ok(Some(space.clone()))
+"#,
+    );
+
+    text = text.replace(
+        r#"        let space = store.leave_space(&mut spaces, "laptop", "office").unwrap();
+        let record = store.records.get("office").unwrap();
+
+        assert!(record.left);
+        assert_eq!(record.key_epoch, 0);
+        assert!(!space.active);
+        assert!(space.addons.is_empty());
+"#,
+        r#"        let space = store.leave_space(&mut spaces, "laptop", "office").unwrap();
+
+        assert_eq!(space.space_id, "office");
+        assert!(!space.active);
+        assert!(space.addons.is_empty());
+        assert!(!store.records.contains_key("office"));
+        assert!(spaces.spaces.iter().all(|space| space.space_id != "office"));
+        assert!(store.invites.iter().all(|invite| invite.space_id != "office"));
 "#,
     );
 
