@@ -1,11 +1,11 @@
 use crate::addons::{load_addon_manifests, AddonRecord};
 use crate::config::space_membership::{
     load_or_create_space_membership_store, save_space_membership_store, ImportedSpaceInvite,
-    SpaceInviteStatus,
+    SpaceInviteStatus, SpaceRole,
 };
 use crate::config::space_sync_live::{
     apply_pending_space_sync_events, broadcast_update, imported_invite_from_space, send_accept,
-    send_invite, send_leave,
+    send_invite, send_leave, send_sync_message, SpaceSyncMessage,
 };
 use crate::config::spaces::{save_space_store, SpaceKind, SpaceRecord, SpaceRegistry};
 use crate::config::{
@@ -159,6 +159,29 @@ struct SpaceSendResponse {
     deliveries: Vec<SpaceSendPeerResult>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct SpaceView {
+    space_id: String,
+    name: String,
+    kind: SpaceKind,
+    active: bool,
+    members: Vec<String>,
+    addon_count: usize,
+    role: String,
+    local_state: String,
+    owner_device_id: Option<String>,
+    invite_status: Option<String>,
+    left: bool,
+    can_accept_invite: bool,
+    can_decline_invite: bool,
+    can_connect: bool,
+    can_disconnect: bool,
+    can_leave: bool,
+    can_invite_members: bool,
+    can_remove_members: bool,
+    can_manage_addons: bool,
+}
+
 #[derive(Debug, Serialize)]
 struct ChannelOpenResponse {
     peer_id: String,
@@ -196,6 +219,102 @@ fn err(message: impl Into<String>) -> ApiResponse<()> {
         data: None,
         error: Some(message.into()),
     }
+}
+
+fn space_view(
+    space: &SpaceRecord,
+    membership: &crate::config::space_membership::SpaceMembershipStore,
+    local_device_id: &str,
+) -> SpaceView {
+    let record = membership.records.get(&space.space_id);
+    let role = record
+        .map(|record| match record.role {
+            SpaceRole::Owner => "owner",
+            SpaceRole::Member => "member",
+        })
+        .unwrap_or("owner")
+        .to_string();
+    let owner_device_id = record.map(|record| record.owner_device_id.clone());
+    let invite_status = record
+        .and_then(|record| record.invite_state.as_ref())
+        .map(|invite| match invite.status {
+            SpaceInviteStatus::Pending => "pending".to_string(),
+            SpaceInviteStatus::Accepted => "accepted".to_string(),
+            SpaceInviteStatus::Declined => "declined".to_string(),
+        });
+    let left = record.map(|record| record.left).unwrap_or(false);
+    let is_owner = record
+        .map(|record| record.is_owner_for(local_device_id))
+        .unwrap_or(true);
+    let pending = invite_status.as_deref() == Some("pending");
+    let declined = invite_status.as_deref() == Some("declined");
+    let removed = left
+        && record
+            .map(|record| record.role == SpaceRole::Member && record.key_epoch == 0)
+            .unwrap_or(false);
+    let local_state = if is_owner {
+        "owned"
+    } else if removed {
+        "removed"
+    } else if left {
+        "left"
+    } else if pending {
+        "invite_pending"
+    } else if declined {
+        "invite_declined"
+    } else {
+        "joined"
+    }
+    .to_string();
+
+    SpaceView {
+        space_id: space.space_id.clone(),
+        name: space.name.clone(),
+        kind: space.kind.clone(),
+        active: space.active,
+        members: space.members.clone(),
+        addon_count: space.addons.len(),
+        role,
+        local_state,
+        owner_device_id,
+        invite_status,
+        left,
+        can_accept_invite: !is_owner && pending && !left,
+        can_decline_invite: !is_owner && pending && !left,
+        can_connect: !space.active && !left && !pending,
+        can_disconnect: space.active && !left,
+        can_leave: !is_owner && !left && !pending,
+        can_invite_members: is_owner,
+        can_remove_members: is_owner,
+        can_manage_addons: is_owner,
+    }
+}
+
+fn space_views(
+    store: &crate::config::spaces::SpaceStore,
+    membership: &crate::config::space_membership::SpaceMembershipStore,
+    local_device_id: &str,
+) -> Vec<SpaceView> {
+    let mut response: Vec<_> = store
+        .spaces
+        .iter()
+        .map(|space| space_view(space, membership, local_device_id))
+        .collect();
+    response.sort_by(|a, b| {
+        let bucket = |space: &SpaceView| match space.local_state.as_str() {
+            "invite_pending" => 0,
+            "owned" => 1,
+            "joined" => 2,
+            "removed" => 3,
+            "left" => 4,
+            _ => 5,
+        };
+        bucket(a)
+            .cmp(&bucket(b))
+            .then(a.name.cmp(&b.name))
+            .then(a.space_id.cmp(&b.space_id))
+    });
+    response
 }
 
 async fn create_and_send_space_invite(
@@ -455,8 +574,11 @@ async fn handle_request(
                 connections.clone(),
             )
             .await;
-            let mut response = store.spaces.clone();
-            response.sort_by(|a, b| a.name.cmp(&b.name).then(a.space_id.cmp(&b.space_id)));
+            membership.ensure_local_records(&store, &cfg.device_id);
+            membership.validate_and_repair(&mut store)?;
+            save_space_store(&store)?;
+            save_space_membership_store(&membership)?;
+            let response = space_views(&store, &membership, &cfg.device_id);
             Ok(serde_json::to_string(&ok(response))?)
         }
 
@@ -485,11 +607,15 @@ async fn handle_request(
             save_space_store(&updated)?;
             *store = updated;
 
+            let mut membership = load_or_create_space_membership_store()?;
+            membership.ensure_owned_space(&store, &space_id, &cfg.device_id)?;
+            save_space_membership_store(&membership)?;
+
             let response = store
                 .spaces
                 .iter()
                 .find(|space| space.space_id == space_id)
-                .cloned()
+                .map(|space| space_view(space, &membership, &cfg.device_id))
                 .ok_or_else(|| anyhow::anyhow!("space was not created"))?;
 
             Ok(serde_json::to_string(&ok(response))?)
@@ -510,25 +636,22 @@ async fn handle_request(
                 connections.clone(),
             )
             .await;
+            membership.ensure_local_records(&store, &cfg.device_id);
 
-            let pending_owner_device_id = membership.records.get(&space_id).and_then(|record| {
-                record
-                    .invite_state
-                    .as_ref()
-                    .filter(|invite| invite.status == SpaceInviteStatus::Pending)
-                    .map(|_| record.owner_device_id.clone())
-            });
-
-            if let Some(owner_device_id) = pending_owner_device_id {
-                let _accepted_space =
-                    membership.accept_invite(&mut store, &cfg.device_id, &space_id)?;
-                let _delivery = send_accept(
-                    connections.clone(),
-                    &owner_device_id,
-                    &space_id,
-                    &cfg.device_id,
-                )
-                .await;
+            let record = membership
+                .records
+                .get(&space_id)
+                .ok_or_else(|| anyhow::anyhow!("space has no membership metadata: {}", space_id))?;
+            anyhow::ensure!(!record.left, "space has been left or removed locally");
+            if let Some(invite) = record.invite_state.as_ref() {
+                anyhow::ensure!(
+                    invite.status != SpaceInviteStatus::Pending,
+                    "accept the pending invite before connecting this space"
+                );
+                anyhow::ensure!(
+                    invite.status != SpaceInviteStatus::Declined,
+                    "cannot connect a declined invite"
+                );
             }
 
             let response = store.set_space_active(&space_id, true)?;
@@ -582,24 +705,36 @@ async fn handle_request(
                 .ok_or_else(|| anyhow::anyhow!("remove_space_member requires peer_id"))?;
 
             let mut store = spaces.lock().await;
-            let mut updated = store.clone();
-            let space = updated
-                .spaces
-                .iter_mut()
-                .find(|space| space.space_id == space_id)
-                .ok_or_else(|| anyhow::anyhow!("unknown space: {}", space_id))?;
+            let mut membership = load_or_create_space_membership_store()?;
+            membership.ensure_local_records(&store, &cfg.device_id);
+            let update =
+                membership.remove_member_by_owner(&mut store, &cfg.device_id, &space_id, &peer_id)?;
+            membership.validate_and_repair(&mut store)?;
+            let mut deliveries = broadcast_update(connections.clone(), update.clone(), None).await;
+            deliveries.push(
+                send_sync_message(
+                    connections.clone(),
+                    &peer_id,
+                    &space_id,
+                    SpaceSyncMessage::Update {
+                        update: update.clone(),
+                    },
+                )
+                .await,
+            );
+            save_space_store(&store)?;
+            save_space_membership_store(&membership)?;
 
-            space.members.retain(|member| member != &peer_id);
-            updated.validate_and_repair()?;
-            save_space_store(&updated)?;
-            *store = updated;
-
-            let response = store
+            let space = store
                 .spaces
                 .iter()
                 .find(|space| space.space_id == space_id)
-                .cloned()
                 .ok_or_else(|| anyhow::anyhow!("unknown space after update: {}", space_id))?;
+            let response = serde_json::json!({
+                "space": space_view(space, &membership, &cfg.device_id),
+                "space_update": update,
+                "deliveries": deliveries
+            });
 
             Ok(serde_json::to_string(&ok(response))?)
         }
@@ -615,7 +750,12 @@ async fn handle_request(
                 connections.clone(),
             )
             .await;
-            let response = membership.pending_joined_invites(&store);
+            membership.ensure_local_records(&store, &cfg.device_id);
+            let response: Vec<_> = membership
+                .pending_joined_invites(&store)
+                .iter()
+                .map(|space| space_view(space, &membership, &cfg.device_id))
+                .collect();
             Ok(serde_json::to_string(&ok(response))?)
         }
 

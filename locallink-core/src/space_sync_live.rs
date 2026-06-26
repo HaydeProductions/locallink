@@ -349,7 +349,9 @@ async fn apply_message(
             if update.owner_device_id != sender_peer_id {
                 anyhow::bail!("space update owner did not match sender");
             }
-            let applied = membership.apply_owner_update(spaces, update)?.is_some();
+            let applied = membership
+                .apply_owner_update(spaces, local_device_id, update)?
+                .is_some();
             membership.validate_and_repair(spaces)?;
             Ok(applied)
         }
