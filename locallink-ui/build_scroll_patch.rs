@@ -100,16 +100,20 @@ fn patch_spaces_delete_controls() {
         );
     }
 
-    if !text.contains("Delete Space" ) {
+    if !text.contains("Delete Local Copy") {
         text = text.replace(
             "                        if space.can_leave && ui\n                            .add(danger_button(\"Leave Group\"))\n                            .on_hover_cursor(egui::CursorIcon::PointingHand)\n                            .clicked()\n                        {\n                            self.send_job(ApiJob::LeaveSpace { space_id: space.id.clone() });\n                        }",
-            "                        if space.can_leave && ui\n                            .add(danger_button(\"Leave Group\"))\n                            .on_hover_cursor(egui::CursorIcon::PointingHand)\n                            .clicked()\n                        {\n                            self.send_job(ApiJob::LeaveSpace { space_id: space.id.clone() });\n                        }\n\n                        if space.role == \"owner\" && ui\n                            .add(danger_button(\"Delete Space\"))\n                            .on_hover_cursor(egui::CursorIcon::PointingHand)\n                            .clicked()\n                        {\n                            self.send_job(ApiJob::DeleteSpace { space_id: space.id.clone() });\n                        }",
+            "                        if space.can_leave && ui\n                            .add(danger_button(\"Leave Group\"))\n                            .on_hover_cursor(egui::CursorIcon::PointingHand)\n                            .clicked()\n                        {\n                            self.send_job(ApiJob::LeaveSpace { space_id: space.id.clone() });\n                        }\n\n                        let can_delete_local_copy = space.local_state == \"removed\" || space.local_state == \"left\";\n                        if (space.role == \"owner\" || can_delete_local_copy) && ui\n                            .add(danger_button(if space.role == \"owner\" { \"Delete Space\" } else { \"Delete Local Copy\" }))\n                            .on_hover_cursor(egui::CursorIcon::PointingHand)\n                            .clicked()\n                        {\n                            self.send_job(ApiJob::DeleteSpace { space_id: space.id.clone() });\n                        }",
         );
     }
 
     text = text.replace(
         "Disconnect only affects local activity. Leave exits a foreign group.",
-        "Disconnect only affects local activity. Leave exits a foreign group. Delete removes an owned space for everyone.",
+        "Disconnect only affects local activity. Leave exits a foreign group. Deleted/removed foreign spaces can be cleared locally.",
+    );
+    text = text.replace(
+        "Delete removes an owned space for everyone.",
+        "Delete removes an owned space for everyone. Delete Local Copy only clears a removed foreign space from this device.",
     );
 
     if text != original {
