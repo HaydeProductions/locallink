@@ -1,4 +1,7 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+#![allow(clippy::collapsible_match)]
+#![allow(clippy::unnecessary_cast)]
+#![allow(clippy::unnecessary_mut_passed)]
 
 use anyhow::{bail, Context, Result};
 use serde_json::json;

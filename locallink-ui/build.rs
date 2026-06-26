@@ -19,8 +19,131 @@ fn main() {
         "use std::process::{Child, Command, Stdio};\n",
         "use std::process::{Child, Command, Stdio};\n#[cfg(target_os = \"windows\")]\nuse std::os::windows::process::CommandExt;\n",
     );
+    generated = generated.replace(
+        "use std::process::{Command, Stdio};\n",
+        "use std::process::{Command, Stdio};\n#[cfg(target_os = \"windows\")]\nuse std::os::windows::process::CommandExt;\n",
+    );
 
     generated = generated.replace("use std::sync::mpsc;\n", "use std::sync::{mpsc, Arc};\n");
+
+    generated = must_replace(
+        generated,
+        "enum Screen {\n    Discover,\n    Devices,\n    Addons,\n    Activity,\n}",
+        "enum Screen {\n    Discover,\n    Devices,\n    Spaces,\n    Addons,\n    Activity,\n}",
+    );
+
+    generated = must_replace(
+        generated,
+        "    Addons,\n    PollEvents {",
+        "    Addons,\n    Spaces,\n    CreateSpace {\n        name: String,\n        kind: String,\n    },\n    ActivateSpace {\n        space_id: String,\n    },\n    DeactivateSpace {\n        space_id: String,\n    },\n    AddSpaceMember {\n        space_id: String,\n        peer_id: String,\n    },\n    RemoveSpaceMember {\n        space_id: String,\n        peer_id: String,\n    },\n    AcceptSpaceInvite {\n        space_id: String,\n    },\n    DeclineSpaceInvite {\n        space_id: String,\n    },\n    LeaveSpace {\n        space_id: String,\n    },\n    PollEvents {",
+    );
+
+    generated = must_replace(
+        generated,
+        "#[derive(Debug, Clone, Default)]\nstruct EventRow {",
+        "#[derive(Debug, Clone, Default)]\nstruct SpaceRow {\n    id: String,\n    name: String,\n    kind: String,\n    active: bool,\n    members: Vec<String>,\n    addon_count: usize,\n    role: String,\n    owner_device_id: String,\n    local_state: String,\n    can_accept_invite: bool,\n    can_decline_invite: bool,\n    can_connect: bool,\n    can_disconnect: bool,\n    can_leave: bool,\n    can_invite_members: bool,\n    can_remove_members: bool,\n    can_manage_addons: bool,\n}\n\n#[derive(Debug, Clone, Default)]\nstruct EventRow {",
+    );
+
+    generated = must_replace(
+        generated,
+        "    addons: Vec<AddonRow>,\n    events: Vec<EventRow>,",
+        "    addons: Vec<AddonRow>,\n    spaces: Vec<SpaceRow>,\n    events: Vec<EventRow>,",
+    );
+
+    generated = must_replace(
+        generated,
+        "    add_name: String,\n    add_mac: String,\n    event_filter: String,",
+        "    add_name: String,\n    add_mac: String,\n    event_filter: String,\n    space_name: String,\n    space_kind_group: bool,\n    space_member_peer_id: String,",
+    );
+
+    generated = must_replace(
+        generated,
+        "            addons: Vec::new(),\n            events: Vec::new(),",
+        "            addons: Vec::new(),\n            spaces: Vec::new(),\n            events: Vec::new(),",
+    );
+
+    generated = must_replace(
+        generated,
+        "            add_name: String::new(),\n            add_mac: String::new(),\n            event_filter: String::new(),",
+        "            add_name: String::new(),\n            add_mac: String::new(),\n            event_filter: String::new(),\n            space_name: String::new(),\n            space_kind_group: false,\n            space_member_peer_id: String::new(),",
+    );
+
+    generated = must_replace(
+        generated,
+        "                let _ = refresh_tx.send(ApiJob::Connections);\n\n                if tick % 3 == 0 {\n                    let _ = refresh_tx.send(ApiJob::Addons);\n                }",
+        "                let _ = refresh_tx.send(ApiJob::Connections);\n\n                if tick % 3 == 0 {\n                    let _ = refresh_tx.send(ApiJob::Spaces);\n                    let _ = refresh_tx.send(ApiJob::Addons);\n                }",
+    );
+
+    generated = must_replace(
+        generated,
+        "        self.send_job(ApiJob::Connections);\n        self.send_job(ApiJob::Addons);",
+        "        self.send_job(ApiJob::Connections);\n        self.send_job(ApiJob::Spaces);\n        self.send_job(ApiJob::Addons);",
+    );
+
+    generated = must_replace(
+        generated,
+        "            Screen::Addons => {\n                self.send_job(ApiJob::Addons);\n            }",
+        "            Screen::Spaces => {\n                self.send_job(ApiJob::Spaces);\n            }\n            Screen::Addons => {\n                self.send_job(ApiJob::Addons);\n            }",
+    );
+
+    generated = must_replace(
+        generated,
+        "            \"addons\" => self.apply_addons(value),\n            \"poll_events\" => self.apply_events(value),",
+        "            \"addons\" => self.apply_addons(value),\n            \"spaces\" => self.apply_spaces(value),\n            \"poll_events\" => self.apply_events(value),",
+    );
+
+    generated = generated.replace(
+        "                self.send_job(ApiJob::Connections);\n                self.send_job(ApiJob::Addons);",
+        "                self.send_job(ApiJob::Connections);\n                self.send_job(ApiJob::Spaces);\n                self.send_job(ApiJob::Addons);",
+    );
+
+    generated = must_replace(
+        generated,
+        "            \"shutdown\" => {\n                self.status = None;\n                self.log(\"Core shutdown requested.\");\n            }",
+        "            \"shutdown\" => {\n                self.status = None;\n                self.log(\"Core shutdown requested.\");\n            }\n            \"create_space\" => {\n                self.log(\"Space created.\");\n                self.space_name.clear();\n                self.send_job(ApiJob::Spaces);\n            }\n            \"activate_space\" => {\n                self.log(\"Space connected.\");\n                self.send_job(ApiJob::Spaces);\n                self.send_job(ApiJob::Addons);\n            }\n            \"deactivate_space\" => {\n                self.log(\"Space disconnected.\");\n                self.send_job(ApiJob::Spaces);\n                self.send_job(ApiJob::Addons);\n            }\n            \"add_space_member\" => {\n                self.log(\"Space invite sent.\");\n                self.space_member_peer_id.clear();\n                self.send_job(ApiJob::Spaces);\n            }\n            \"remove_space_member\" => {\n                self.log(\"Space member removed.\");\n                self.send_job(ApiJob::Spaces);\n            }\n            \"accept_space_invite\" => {\n                self.log(\"Space invite accepted.\");\n                self.send_job(ApiJob::Spaces);\n                self.send_job(ApiJob::Addons);\n            }\n            \"decline_space_invite\" => {\n                self.log(\"Space invite declined.\");\n                self.send_job(ApiJob::Spaces);\n            }\n            \"leave_space\" => {\n                self.log(\"Left space.\");\n                self.send_job(ApiJob::Spaces);\n                self.send_job(ApiJob::Addons);\n            }",
+    );
+
+    generated = must_replace(
+        generated,
+        "    fn apply_events(&mut self, v: Value) {",
+        "    fn apply_spaces(&mut self, v: Value) {\n        self.spaces.clear();\n\n        if let Some(rows) = v.get(\"data\").and_then(|x| x.as_array()) {\n            for row in rows {\n                let addon_count = row\n                    .get(\"addons\")\n                    .and_then(|x| x.as_object())\n                    .map(|addons| addons.len())\n                    .unwrap_or(0);\n\n                self.spaces.push(SpaceRow {\n                    id: str_field(row, \"space_id\"),\n                    name: str_field(row, \"name\"),\n                    kind: str_field(row, \"kind\"),\n                    active: bool_field(row, \"active\"),\n                    members: string_array_field(row, \"members\"),\n                    addon_count,\n                    role: str_field(row, \"role\"),\n                    owner_device_id: str_field(row, \"owner_device_id\"),\n                    local_state: str_field(row, \"local_state\"),\n                    can_accept_invite: bool_field(row, \"can_accept_invite\"),\n                    can_decline_invite: bool_field(row, \"can_decline_invite\"),\n                    can_connect: bool_field(row, \"can_connect\"),\n                    can_disconnect: bool_field(row, \"can_disconnect\"),\n                    can_leave: bool_field(row, \"can_leave\"),\n                    can_invite_members: bool_field(row, \"can_invite_members\"),\n                    can_remove_members: bool_field(row, \"can_remove_members\"),\n                    can_manage_addons: bool_field(row, \"can_manage_addons\"),\n                });\n            }\n        }\n    }\n\n    fn apply_events(&mut self, v: Value) {",
+    );
+
+    generated = must_replace(
+        generated,
+        "                                Screen::Devices => self.screen_devices(ui),\n                                Screen::Addons => self.screen_addons(ui),",
+        "                                Screen::Devices => self.screen_devices(ui),\n                                Screen::Spaces => self.screen_spaces(ui),\n                                Screen::Addons => self.screen_addons(ui),",
+    );
+
+    generated = must_replace(
+        generated,
+        "        let container_width: f32 = available_width.min(390.0).max(312.0);",
+        "        let container_width: f32 = available_width.min(430.0).max(350.0);",
+    );
+
+    generated = must_replace(
+        generated,
+        "        let tab_count: f32 = 4.0;",
+        "        let tab_count: f32 = 5.0;",
+    );
+
+    generated = must_replace(
+        generated,
+        "            (Screen::Devices, \"Devices\"),\n            (Screen::Addons, \"Add-ons\"),",
+        "            (Screen::Devices, \"Devices\"),\n            (Screen::Spaces, \"Spaces\"),\n            (Screen::Addons, \"Add-ons\"),",
+    );
+
+    generated = must_replace(
+        generated,
+        "            ApiJob::Connections => json!({ \"cmd\": \"list_connections\" }),\n            ApiJob::Addons => json!({ \"cmd\": \"list_addons\" }),",
+        "            ApiJob::Connections => json!({ \"cmd\": \"list_connections\" }),\n            ApiJob::Addons => json!({ \"cmd\": \"list_addons\" }),\n            ApiJob::Spaces => json!({ \"cmd\": \"list_spaces\" }),\n            ApiJob::CreateSpace { name, kind } => json!({\n                \"cmd\": \"create_space\",\n                \"name\": name,\n                \"kind\": kind\n            }),\n            ApiJob::ActivateSpace { space_id } => json!({\n                \"cmd\": \"activate_space\",\n                \"space_id\": space_id\n            }),\n            ApiJob::DeactivateSpace { space_id } => json!({\n                \"cmd\": \"deactivate_space\",\n                \"space_id\": space_id\n            }),\n            ApiJob::AddSpaceMember { space_id, peer_id } => json!({\n                \"cmd\": \"add_space_member\",\n                \"space_id\": space_id,\n                \"peer_id\": peer_id\n            }),\n            ApiJob::RemoveSpaceMember { space_id, peer_id } => json!({\n                \"cmd\": \"remove_space_member\",\n                \"space_id\": space_id,\n                \"peer_id\": peer_id\n            }),\n            ApiJob::AcceptSpaceInvite { space_id } => json!({\n                \"cmd\": \"accept_space_invite\",\n                \"space_id\": space_id\n            }),\n            ApiJob::DeclineSpaceInvite { space_id } => json!({\n                \"cmd\": \"decline_space_invite\",\n                \"space_id\": space_id\n            }),\n            ApiJob::LeaveSpace { space_id } => json!({\n                \"cmd\": \"leave_space\",\n                \"space_id\": space_id\n            }),",
+    );
+
+    generated = must_replace(
+        generated,
+        "        ApiJob::Connections => \"connections\",\n        ApiJob::Addons => \"addons\",",
+        "        ApiJob::Connections => \"connections\",\n        ApiJob::Addons => \"addons\",\n        ApiJob::Spaces => \"spaces\",\n        ApiJob::CreateSpace { .. } => \"create_space\",\n        ApiJob::ActivateSpace { .. } => \"activate_space\",\n        ApiJob::DeactivateSpace { .. } => \"deactivate_space\",\n        ApiJob::AddSpaceMember { .. } => \"add_space_member\",\n        ApiJob::RemoveSpaceMember { .. } => \"remove_space_member\",\n        ApiJob::AcceptSpaceInvite { .. } => \"accept_space_invite\",\n        ApiJob::DeclineSpaceInvite { .. } => \"decline_space_invite\",\n        ApiJob::LeaveSpace { .. } => \"leave_space\",",
+    );
 
     generated = must_replace(
         generated,
@@ -31,7 +154,7 @@ fn main() {
     generated = must_replace(
         generated,
         "    fn start_core(&mut self) {\n        match start_sibling_core() {\n            Ok(()) => {\n                self.log(\"Starting LocalLink Core...\");\n                std::thread::sleep(Duration::from_millis(250));\n                self.refresh_all();\n            }\n            Err(e) => self.log(format!(\"Could not start core: {e}\")),\n        }\n    }\n\n",
-        "    fn start_core(&mut self) {\n        force_stop_core_processes();\n        std::thread::sleep(Duration::from_millis(200));\n\n        match start_sibling_core() {\n            Ok(()) => {\n                self.log(\"Starting LocalLink Core...\");\n                std::thread::sleep(Duration::from_millis(250));\n                self.refresh_all();\n            }\n            Err(e) => self.log(format!(\"Could not start core: {e}\")),\n        }\n    }\n\n    fn stop_core(&mut self) {\n        self.send_job(ApiJob::Shutdown);\n        force_stop_core_processes();\n\n        self.status = None;\n        self.peers.clear();\n        self.connections.clear();\n        self.addons.clear();\n\n        self.log(\"Stopped LocalLink Core.\");\n    }\n\n",
+        "    fn start_core(&mut self) {\n        force_stop_core_processes();\n        std::thread::sleep(Duration::from_millis(200));\n\n        match start_sibling_core() {\n            Ok(()) => {\n                self.log(\"Starting LocalLink Core...\");\n                std::thread::sleep(Duration::from_millis(250));\n                self.refresh_all();\n            }\n            Err(e) => self.log(format!(\"Could not start core: {e}\")),\n        }\n    }\n\n    fn stop_core(&mut self) {\n        self.send_job(ApiJob::Shutdown);\n        force_stop_core_processes();\n\n        self.status = None;\n        self.peers.clear();\n        self.connections.clear();\n        self.spaces.clear();\n        self.addons.clear();\n\n        self.log(\"Stopped LocalLink Core.\");\n    }\n\n",
     );
 
     generated = must_replace(
@@ -69,18 +192,17 @@ fn main() {
         "    let mut command = Command::new(core);\n    command\n        .current_dir(dir)\n        .stdin(Stdio::null())\n        .stdout(Stdio::null())\n        .stderr(Stdio::null());\n\n    #[cfg(target_os = \"windows\")]\n    command.creation_flags(0x08000000); // CREATE_NO_WINDOW\n\n    command.spawn()?;",
     );
 
-    generated = must_replace(
-        generated,
+    generated = generated.replace(
         "        self.reconcile_addon_processes();\n",
         "        // The UI only displays add-on state. Add-on processes are owned by the core/connection layer, not the UI.\n",
     );
 
-    generated = must_replace(
-        generated,
+    generated = generated.replace(
         "        if enabled {\n            match launch_addon(&addon_snapshot) {\n                Ok(child) => {\n                    self.addon_processes\n                        .insert(addon_snapshot.id.clone(), child);\n                    self.log(format!(\"Enabled {}\", addon_snapshot.name));\n                }\n                Err(e) => self.log(format!(\n                    \"{} was enabled but could not be launched: {e}\",\n                    addon_snapshot.name\n                )),\n            }\n        } else if let Some(mut child) = self.addon_processes.remove(&addon_snapshot.id) {\n            let _ = child.kill();\n            self.log(format!(\"Disabled {}\", addon_snapshot.name));\n        } else {\n            self.log(format!(\"Disabled {}\", addon_snapshot.name));\n        }\n\n        self.send_job(ApiJob::ReloadAddons);",
         "        if enabled {\n            self.log(format!(\"Enabled {}\", addon_snapshot.name));\n        } else {\n            self.log(format!(\"Disabled {}\", addon_snapshot.name));\n        }\n\n        self.send_job(ApiJob::ReloadAddons);",
     );
 
+    generated.push_str(SPACES_UI_CODE);
     generated.push_str(NETWORK_REQUIREMENTS_CODE);
     generated.push_str(PROCESS_CONTROL_CODE);
     generated.push_str(WINDOW_ICON_CODE);
@@ -119,6 +241,420 @@ fn must_replace(input: String, from: &str, to: &str) -> String {
 
     output
 }
+
+const SPACES_UI_CODE: &str = r#"
+
+impl LocalLinkUi {
+    fn space_member_candidates(&self) -> Vec<(String, String, String)> {
+        let mut candidates = Vec::<(String, String, String)>::new();
+
+        for connection in &self.connections {
+            let id = connection.device_id.clone();
+            if !id.trim().is_empty() && !candidates.iter().any(|(existing, _, _)| existing == &id) {
+                candidates.push((id, connection.device_name.clone(), "Connected".to_string()));
+            }
+        }
+
+        for peer in &self.peers {
+            let id = peer.device_id.clone();
+            if !id.trim().is_empty() && !candidates.iter().any(|(existing, _, _)| existing == &id) {
+                let source = if peer.trusted { "Nearby trusted" } else { "Nearby" };
+                candidates.push((id, peer.device_name.clone(), source.to_string()));
+            }
+        }
+
+        for trusted in &self.trusted {
+            if let Some(device_id) = &trusted.device_id {
+                let id = device_id.clone();
+                if !id.trim().is_empty() && !candidates.iter().any(|(existing, _, _)| existing == &id) {
+                    candidates.push((id, trusted.name.clone(), "Trusted".to_string()));
+                }
+            }
+        }
+
+        candidates
+    }
+
+    fn screen_spaces(&mut self, ui: &mut egui::Ui) {
+        page_title(
+            ui,
+            "Spaces",
+            "Owned spaces and joined spaces are separate. Pending invitations must be accepted before they can connect.",
+        );
+
+        ui.add_space(14.0);
+
+        if !self.core_online() {
+            notice(
+                ui,
+                "Core is offline",
+                "Start LocalLink Core to load connection spaces.",
+                color_error(),
+            );
+            return;
+        }
+
+        glass_panel(ui, |ui| {
+            ui.heading(egui::RichText::new("Create owned space").color(color_text()));
+            ui.label(
+                egui::RichText::new("Spaces created here are owned by this device. Only owned spaces can invite or remove members.")
+                    .color(color_muted()),
+            );
+
+            ui.add_space(8.0);
+
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Name");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.space_name)
+                        .desired_width(170.0)
+                        .hint_text("Gaming PC space"),
+                );
+            });
+
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Kind");
+                let mut direct = !self.space_kind_group;
+                let mut group = self.space_kind_group;
+
+                if ui.radio_value(&mut direct, true, "Direct").clicked() {
+                    self.space_kind_group = false;
+                }
+                if ui.radio_value(&mut group, true, "Group").clicked() {
+                    self.space_kind_group = true;
+                }
+            });
+
+            ui.add_space(8.0);
+
+            if ui
+                .add(primary_button("Create Owned Space"))
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
+                let name = self.space_name.trim().to_string();
+                if name.is_empty() {
+                    self.log("Space name is required.");
+                } else {
+                    let kind = if self.space_kind_group { "group" } else { "direct" }.to_string();
+                    self.send_job(ApiJob::CreateSpace { name, kind });
+                }
+            }
+        });
+
+        ui.add_space(14.0);
+
+        if self.spaces.is_empty() {
+            notice(
+                ui,
+                "No spaces yet",
+                "Create an owned space above, or wait for a space invite from another device.",
+                color_warning(),
+            );
+            return;
+        }
+
+        let device_candidates = self.space_member_candidates();
+
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for space in self.spaces.clone() {
+                device_card(ui, |ui| {
+                    ui.horizontal_top(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_min_width(0.0);
+                            ui.set_max_width((ui.available_width() - 110.0).max(180.0));
+
+                            ui.label(
+                                egui::RichText::new(&space.name)
+                                    .color(color_text())
+                                    .size(21.0)
+                                    .strong(),
+                            );
+
+                            ui.add_space(4.0);
+
+                            let member_summary = if space.members.is_empty() {
+                                "No members".to_string()
+                            } else if space.members.len() == 1 {
+                                "1 member".to_string()
+                            } else {
+                                format!("{} members", space.members.len())
+                            };
+
+                            let owner_summary = if space.role == "owner" {
+                                "Owned by this device".to_string()
+                            } else if space.owner_device_id.is_empty() {
+                                "Joined foreign space".to_string()
+                            } else {
+                                format!("Owner: {}", ellipsize(&space.owner_device_id, 30))
+                            };
+
+                            ui.label(
+                                egui::RichText::new(format!("{} · {}", member_summary, owner_summary))
+                                    .color(color_muted())
+                                    .size(14.0),
+                            );
+                        });
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                            let state_color = match space.local_state.as_str() {
+                                "owned" => color_accent(),
+                                "joined" => color_success(),
+                                "invite_pending" => color_warning(),
+                                "removed" | "left" => color_error(),
+                                _ => color_muted(),
+                            };
+                            let state_label = match space.local_state.as_str() {
+                                "owned" => "Owned",
+                                "joined" => "Joined",
+                                "invite_pending" => "Invite pending",
+                                "invite_declined" => "Invite declined",
+                                "removed" => "Removed",
+                                "left" => "Left",
+                                _ => "Unknown",
+                            };
+                            state_chip(ui, state_label, state_color);
+                            state_chip(ui, &space.kind, if space.kind == "group" { color_accent() } else { color_success() });
+                            state_chip(ui, if space.active { "Active" } else { "Inactive" }, if space.active { color_success() } else { color_muted() });
+                        });
+                    });
+
+                    ui.add_space(12.0);
+
+                    if space.local_state == "invite_pending" {
+                        notice(
+                            ui,
+                            "Invitation pending",
+                            "This is a foreign space invite. Accept it to join, or decline it. Connecting does not accept invites automatically.",
+                            color_warning(),
+                        );
+                        ui.add_space(8.0);
+                    } else if space.local_state == "removed" {
+                        notice(
+                            ui,
+                            "Removed from space",
+                            "The owner removed this device from the group. The space has been disconnected locally.",
+                            color_error(),
+                        );
+                        ui.add_space(8.0);
+                    } else if space.local_state == "left" {
+                        notice(
+                            ui,
+                            "Left space",
+                            "This device has left the foreign space. Create or accept a new invite to join again.",
+                            color_muted(),
+                        );
+                        ui.add_space(8.0);
+                    }
+
+                    ui.horizontal_wrapped(|ui| {
+                        if space.can_accept_invite && ui
+                            .add(primary_button("Accept Invite"))
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                        {
+                            self.send_job(ApiJob::AcceptSpaceInvite { space_id: space.id.clone() });
+                        }
+
+                        if space.can_decline_invite && ui
+                            .add(danger_button("Decline Invite"))
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                        {
+                            self.send_job(ApiJob::DeclineSpaceInvite { space_id: space.id.clone() });
+                        }
+
+                        if space.can_disconnect && ui
+                            .add(danger_button("Disconnect Space"))
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                        {
+                            self.send_job(ApiJob::DeactivateSpace { space_id: space.id.clone() });
+                        }
+
+                        if space.can_connect && ui
+                            .add(primary_button("Connect Space"))
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                        {
+                            self.send_job(ApiJob::ActivateSpace { space_id: space.id.clone() });
+                        }
+
+                        if space.can_leave && ui
+                            .add(danger_button("Leave Group"))
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                        {
+                            self.send_job(ApiJob::LeaveSpace { space_id: space.id.clone() });
+                        }
+
+                        ui.label(
+                            egui::RichText::new("Disconnect only affects local activity. Leave exits a foreign group.")
+                                .color(color_muted())
+                                .size(12.5),
+                        );
+                    });
+
+                    ui.add_space(14.0);
+
+                    egui::Frame::none()
+                        .fill(color_panel().linear_multiply(0.82))
+                        .stroke(egui::Stroke::new(1.0, color_border().linear_multiply(0.45)))
+                        .rounding(egui::Rounding::same(18))
+                        .inner_margin(egui::Margin::symmetric(16, 13))
+                        .show(ui, |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.label(
+                                        egui::RichText::new("Per-space add-ons")
+                                            .color(color_text())
+                                            .size(15.0)
+                                            .strong(),
+                                    );
+
+                                    ui.add_space(2.0);
+
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{} configured desired state(s).",
+                                            space.addon_count
+                                        ))
+                                        .color(color_muted())
+                                        .size(12.5),
+                                    );
+                                });
+
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if space.can_manage_addons {
+                                            state_chip(ui, "Owner managed", color_success());
+                                        } else {
+                                            state_chip(ui, "Owner controlled", color_muted());
+                                        }
+                                    },
+                                );
+                            });
+                        });
+
+                    ui.add_space(10.0);
+
+                    glass_panel(ui, |ui| {
+                        ui.heading(egui::RichText::new("Members").color(color_text()).size(16.0));
+
+                        if space.members.is_empty() {
+                            ui.label(egui::RichText::new("No accepted members yet.").color(color_muted()));
+                        } else {
+                            for member in &space.members {
+                                ui.horizontal_wrapped(|ui| {
+                                    mono_line(ui, "Peer", &ellipsize(member, 42));
+
+                                    if space.can_remove_members && member != &space.owner_device_id && ui
+                                        .add(danger_button("Remove"))
+                                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                        .clicked()
+                                    {
+                                        self.send_job(ApiJob::RemoveSpaceMember {
+                                            space_id: space.id.clone(),
+                                            peer_id: member.clone(),
+                                        });
+                                    }
+                                });
+                            }
+                        }
+
+                        ui.separator();
+
+                        if !space.can_invite_members {
+                            ui.label(
+                                egui::RichText::new("This is a foreign space. Only the owner can invite or remove members.")
+                                    .color(color_muted()),
+                            );
+                            return;
+                        }
+
+                        if device_candidates.is_empty() {
+                            ui.label(
+                                egui::RichText::new(
+                                    "No discovered, connected, or trusted device IDs available yet. Open Discover/Devices or connect a peer first.",
+                                )
+                                .color(color_muted()),
+                            );
+                        } else {
+                            ui.label(egui::RichText::new("Pick a device to invite").color(color_text()).strong());
+                            ui.add_space(4.0);
+
+                            for (peer_id, label, source) in &device_candidates {
+                                let already_member = space.members.iter().any(|member| member == peer_id);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.vertical(|ui| {
+                                        ui.label(egui::RichText::new(label).color(color_text()).strong());
+                                        ui.label(
+                                            egui::RichText::new(format!("{} · {}", source, ellipsize(peer_id, 28)))
+                                                .color(color_muted())
+                                                .size(12.5),
+                                        );
+                                    });
+
+                                    if already_member {
+                                        state_chip(ui, "Already member", color_success());
+                                    } else if ui
+                                        .add(primary_button("Invite this device"))
+                                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                        .clicked()
+                                    {
+                                        self.space_member_peer_id = peer_id.clone();
+                                    }
+                                });
+                            }
+
+                            ui.separator();
+                        }
+
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Peer ID");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.space_member_peer_id)
+                                    .desired_width(210.0)
+                                    .hint_text("auto-filled from device picker"),
+                            );
+
+                            if ui
+                                .add(primary_button("Send Invite"))
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                .clicked()
+                            {
+                                let peer_id = self.space_member_peer_id.trim().to_string();
+                                if peer_id.is_empty() {
+                                    self.log("Pick a device to invite or enter a Peer ID first.");
+                                } else {
+                                    self.send_job(ApiJob::AddSpaceMember {
+                                        space_id: space.id.clone(),
+                                        peer_id,
+                                    });
+                                }
+                            }
+                        });
+                    });
+
+                    if self.show_advanced {
+                        ui.separator();
+                        mono_line(ui, "Space ID", &ellipsize(&space.id, 60));
+                        mono_line(ui, "Kind", &space.kind);
+                        mono_line(ui, "Role", &space.role);
+                        mono_line(ui, "State", &space.local_state);
+                        mono_line(ui, "Owner", &space.owner_device_id);
+                        mono_line(ui, "Active", if space.active { "true" } else { "false" });
+                        mono_line(ui, "Add-ons", &space.addon_count.to_string());
+                    }
+                });
+
+                ui.add_space(12.0);
+            }
+        });
+    }
+}
+"#;
 
 const NETWORK_REQUIREMENTS_CODE: &str = r#"
 

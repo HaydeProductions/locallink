@@ -8,6 +8,27 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+#[path = "spaces.rs"]
+pub mod spaces;
+
+#[path = "space_membership.rs"]
+pub mod space_membership;
+
+#[path = "core_state.rs"]
+pub mod core_state;
+
+#[path = "space_runtime.rs"]
+pub mod space_runtime;
+
+#[path = "space_sync.rs"]
+pub mod space_sync;
+
+#[path = "space_sync_live.rs"]
+pub mod space_sync_live;
+
+#[path = "space_instances.rs"]
+pub mod space_instances;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub device_id: String,
@@ -15,6 +36,57 @@ pub struct Config {
 
     #[serde(default)]
     pub psk_b64: Option<String>,
+
+    #[serde(default)]
+    pub startup: StartupPreferences,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StartupPreferences {
+    #[serde(default = "default_startup_launch_ui")]
+    pub launch_ui: bool,
+
+    #[serde(default = "default_startup_use_tray")]
+    pub use_tray: bool,
+}
+
+impl Default for StartupPreferences {
+    fn default() -> Self {
+        Self {
+            launch_ui: default_startup_launch_ui(),
+            use_tray: default_startup_use_tray(),
+        }
+    }
+}
+
+impl StartupPreferences {
+    pub fn is_valid(&self) -> bool {
+        self.launch_ui || self.use_tray
+    }
+
+    pub fn repair_invalid(&mut self) -> bool {
+        if self.is_valid() {
+            return false;
+        }
+
+        self.launch_ui = default_startup_launch_ui();
+        self.use_tray = default_startup_use_tray();
+        true
+    }
+}
+
+fn default_startup_launch_ui() -> bool {
+    true
+}
+
+fn default_startup_use_tray() -> bool {
+    false
+}
+
+impl Config {
+    fn repair_invalid_startup_preferences(&mut self) -> bool {
+        self.startup.repair_invalid()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +107,7 @@ pub struct AppPaths {
     pub config_file: String,
     pub trusted_peers_file: String,
     pub trusted_devices_file: String,
+    pub spaces_file: String,
     pub addons_dir: String,
     pub logs_dir: String,
     pub runtime_dir: String,
@@ -57,6 +130,10 @@ pub fn trusted_peers_path() -> Result<PathBuf> {
 
 pub fn trusted_devices_path() -> Result<PathBuf> {
     Ok(app_dir()?.join("trusted-devices.json"))
+}
+
+pub fn spaces_path() -> Result<PathBuf> {
+    Ok(app_dir()?.join("spaces.json"))
 }
 
 pub fn addons_dir() -> Result<PathBuf> {
@@ -85,6 +162,7 @@ pub fn app_paths() -> Result<AppPaths> {
         config_file: config_path()?.display().to_string(),
         trusted_peers_file: trusted_peers_path()?.display().to_string(),
         trusted_devices_file: trusted_devices_path()?.display().to_string(),
+        spaces_file: spaces_path()?.display().to_string(),
         addons_dir: addons_dir()?.display().to_string(),
         logs_dir: logs_dir()?.display().to_string(),
         runtime_dir: runtime_dir()?.display().to_string(),
@@ -108,6 +186,11 @@ pub fn init_app_dirs() -> Result<()> {
     let trusted_devices = trusted_devices_path()?;
     if !trusted_devices.exists() {
         atomic_write(&trusted_devices, b"[]\n")?;
+    }
+
+    let spaces = spaces_path()?;
+    if !spaces.exists() {
+        atomic_write(&spaces, b"{\n  \"spaces\": []\n}\n")?;
     }
 
     Ok(())
@@ -140,12 +223,22 @@ pub fn acquire_single_instance_lock() -> Result<File> {
 
 pub fn load_or_create_config() -> Result<Config> {
     init_app_dirs()?;
+    let _spaces = spaces::load_or_create_space_store()?;
+    let _space_membership = space_membership::load_or_create_space_membership_store()?;
 
     let path = config_path()?;
 
     if path.exists() {
         let text = fs::read_to_string(&path)?;
-        let cfg: Config = serde_json::from_str(&text)?;
+        let raw: serde_json::Value = serde_json::from_str(&text)?;
+        let has_startup_preferences = raw.get("startup").is_some();
+        let mut cfg: Config = serde_json::from_value(raw)?;
+        let repaired = cfg.repair_invalid_startup_preferences();
+
+        if repaired || !has_startup_preferences {
+            save_config(&cfg)?;
+        }
+
         return Ok(cfg);
     }
 
@@ -155,6 +248,7 @@ pub fn load_or_create_config() -> Result<Config> {
         device_id: Uuid::new_v4().to_string(),
         device_name,
         psk_b64: None,
+        startup: StartupPreferences::default(),
     };
 
     save_config(&cfg)?;
@@ -163,7 +257,9 @@ pub fn load_or_create_config() -> Result<Config> {
 
 pub fn save_config(cfg: &Config) -> Result<()> {
     init_app_dirs()?;
-    let text = serde_json::to_string_pretty(cfg)?;
+    let mut cfg = cfg.clone();
+    cfg.repair_invalid_startup_preferences();
+    let text = serde_json::to_string_pretty(&cfg)?;
     atomic_write(&config_path()?, text.as_bytes())?;
     Ok(())
 }
@@ -336,4 +432,41 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     }
     fs::rename(&tmp_path, path)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_preferences_default_to_ui_only() {
+        let startup = StartupPreferences::default();
+
+        assert!(startup.launch_ui);
+        assert!(!startup.use_tray);
+        assert!(startup.is_valid());
+    }
+
+    #[test]
+    fn startup_preferences_repair_both_disabled() {
+        let mut startup = StartupPreferences {
+            launch_ui: false,
+            use_tray: false,
+        };
+
+        assert!(startup.repair_invalid());
+        assert_eq!(startup, StartupPreferences::default());
+    }
+
+    #[test]
+    fn startup_preferences_keep_tray_only_valid() {
+        let mut startup = StartupPreferences {
+            launch_ui: false,
+            use_tray: true,
+        };
+
+        assert!(!startup.repair_invalid());
+        assert!(!startup.launch_ui);
+        assert!(startup.use_tray);
+    }
 }

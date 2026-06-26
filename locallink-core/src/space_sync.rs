@@ -1,0 +1,69 @@
+use crate::addons::AddonRecord;
+use crate::config::core_state::CoreRuntimeState;
+use crate::config::space_instances::space_instance_state::apply_space_addon_sync_plan;
+use crate::config::space_runtime::{
+    plan_space_addon_instances, plan_space_addon_runtime_actions, plan_space_addon_sync,
+    SpaceAddonRuntimeActionPlan, SpaceAddonSyncPlan,
+};
+use crate::config::spaces::SpaceStore;
+use serde::Serialize;
+use std::collections::HashSet;
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SpaceAddonCoreSyncResult {
+    pub sync_plan: SpaceAddonSyncPlan,
+    pub action_plan: SpaceAddonRuntimeActionPlan,
+}
+
+pub fn plan_space_addon_delta_from_state(
+    spaces: &SpaceStore,
+    addons: &[AddonRecord],
+    connected_peer_ids: &HashSet<String>,
+    current_instance_ids: &HashSet<String>,
+) -> SpaceAddonSyncPlan {
+    let desired = plan_space_addon_instances(spaces, addons, connected_peer_ids);
+    plan_space_addon_sync(&desired, current_instance_ids)
+}
+
+pub async fn plan_space_addon_delta_from_core_state(
+    state: &CoreRuntimeState,
+) -> SpaceAddonSyncPlan {
+    let connected_peer_ids: HashSet<String> = {
+        let connections = state.connections.lock().await;
+        connections.keys().cloned().collect()
+    };
+    let spaces = state.spaces.lock().await.clone();
+    let addons = state.addons.lock().await.clone();
+    let current_instance_ids = state.space_addon_instances.lock().await.snapshot();
+
+    plan_space_addon_delta_from_state(&spaces, &addons, &connected_peer_ids, &current_instance_ids)
+}
+
+pub async fn plan_space_addon_actions_from_core_state(
+    state: &CoreRuntimeState,
+    core_api_addr: &str,
+) -> SpaceAddonRuntimeActionPlan {
+    let sync_plan = plan_space_addon_delta_from_core_state(state).await;
+    plan_space_addon_runtime_actions(&sync_plan, core_api_addr)
+}
+
+pub async fn apply_space_addon_delta_to_core_state(
+    state: &CoreRuntimeState,
+    sync_plan: &SpaceAddonSyncPlan,
+) {
+    apply_space_addon_sync_plan(&state.space_addon_instances, sync_plan).await;
+}
+
+pub async fn sync_space_addons_for_core_state(
+    state: &CoreRuntimeState,
+    core_api_addr: &str,
+) -> SpaceAddonCoreSyncResult {
+    let sync_plan = plan_space_addon_delta_from_core_state(state).await;
+    let action_plan = plan_space_addon_runtime_actions(&sync_plan, core_api_addr);
+    apply_space_addon_delta_to_core_state(state, &sync_plan).await;
+
+    SpaceAddonCoreSyncResult {
+        sync_plan,
+        action_plan,
+    }
+}
