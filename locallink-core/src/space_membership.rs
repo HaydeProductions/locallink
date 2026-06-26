@@ -218,6 +218,22 @@ impl SpaceMembershipStore {
             .unwrap_or(false)
     }
 
+    pub fn purge_local_space(
+        &mut self,
+        spaces: &mut SpaceStore,
+        space_id: &str,
+    ) -> Option<SpaceRecord> {
+        let removed = spaces
+            .spaces
+            .iter()
+            .find(|space| space.space_id == space_id)
+            .cloned();
+        spaces.spaces.retain(|space| space.space_id != space_id);
+        self.records.remove(space_id);
+        self.invites.retain(|invite| invite.space_id != space_id);
+        removed
+    }
+
     pub fn set_owner_enabled(
         &mut self,
         spaces: &SpaceStore,
@@ -353,18 +369,14 @@ impl SpaceMembershipStore {
         spaces: &mut SpaceStore,
         space_id: &str,
     ) -> Result<SpaceRecord> {
-        let record = self.record_mut(space_id)?;
+        let record = self.record(space_id)?;
         anyhow::ensure!(
             record.role == SpaceRole::Member,
             "only joined spaces can decline invites"
         );
-        if let Some(invite) = record.invite_state.as_mut() {
-            invite.status = SpaceInviteStatus::Declined;
-        }
-        record.left = true;
-        let space = space_mut(spaces, space_id)?;
-        space.active = false;
-        Ok(space.clone())
+        let space = ensure_space_exists(spaces, space_id)?.clone();
+        self.purge_local_space(spaces, space_id);
+        Ok(space)
     }
 
     pub fn record_member_acceptance(
@@ -419,6 +431,36 @@ impl SpaceMembershipStore {
         self.sync_update(spaces, local_device_id, space_id)
     }
 
+    pub fn delete_owned_space(
+        &mut self,
+        spaces: &mut SpaceStore,
+        local_device_id: &str,
+        space_id: &str,
+    ) -> Result<(SpaceRecord, SpaceSyncUpdate)> {
+        self.ensure_owner(local_device_id, space_id)?;
+        let space = ensure_space_exists(spaces, space_id)?.clone();
+        let (owner_device_id, revision) = {
+            let record = self.record_mut(space_id)?;
+            record.owner_enabled = false;
+            record.key_epoch = 0;
+            bump(record);
+            (record.owner_device_id.clone(), record.revision)
+        };
+        let update = SpaceSyncUpdate {
+            message_type: "space_deleted".to_string(),
+            space_id: space.space_id.clone(),
+            owner_device_id,
+            revision,
+            name: space.name.clone(),
+            kind: space.kind.clone(),
+            owner_enabled: false,
+            members: space.members.clone(),
+            key_epoch: 0,
+        };
+        self.purge_local_space(spaces, space_id);
+        Ok((space, update))
+    }
+
     pub fn leave_space(
         &mut self,
         spaces: &mut SpaceStore,
@@ -433,15 +475,14 @@ impl SpaceMembershipStore {
         {
             anyhow::bail!("owner cannot leave their own space; delete/remove is separate");
         }
-        let record = self.record_mut(space_id)?;
-        record.left = true;
-        record.key_epoch = 0;
-        record.invite_state = None;
-        let space = space_mut(spaces, space_id)?;
-        space.active = false;
-        space.addons.clear();
-        space.members.retain(|member| member != local_device_id);
-        Ok(space.clone())
+        let record = self.record(space_id)?;
+        anyhow::ensure!(
+            record.role == SpaceRole::Member,
+            "only joined spaces can be left"
+        );
+        let space = ensure_space_exists(spaces, space_id)?.clone();
+        self.purge_local_space(spaces, space_id);
+        Ok(space)
     }
 
     pub fn apply_owner_update(
@@ -450,19 +491,25 @@ impl SpaceMembershipStore {
         local_device_id: &str,
         update: SpaceSyncUpdate,
     ) -> Result<Option<SpaceRecord>> {
-        {
-            let record = self.record(&update.space_id)?;
-            anyhow::ensure!(
-                record.role == SpaceRole::Member,
-                "only joined spaces apply owner updates"
-            );
-            anyhow::ensure!(
-                record.owner_device_id == update.owner_device_id,
-                "owner mismatch"
-            );
-            if record.left || update.revision <= record.revision {
-                return Ok(None);
-            }
+        let Some(existing_record) = self.records.get(&update.space_id) else {
+            return Ok(None);
+        };
+        anyhow::ensure!(
+            existing_record.role == SpaceRole::Member,
+            "only joined spaces apply owner updates"
+        );
+        anyhow::ensure!(
+            existing_record.owner_device_id == update.owner_device_id,
+            "owner mismatch"
+        );
+        let deletion_update = update.message_type == "space_deleted"
+            || !update.owner_enabled
+            || update.key_epoch == 0;
+        if existing_record.left && !deletion_update {
+            return Ok(None);
+        }
+        if update.revision <= existing_record.revision && !deletion_update {
+            return Ok(None);
         }
 
         let was_locally_member = spaces
@@ -471,34 +518,29 @@ impl SpaceMembershipStore {
             .find(|space| space.space_id == update.space_id)
             .map(|space| space.members.iter().any(|member| member == local_device_id))
             .unwrap_or(false);
-        let invite_was_accepted = self
-            .records
-            .get(&update.space_id)
-            .and_then(|record| record.invite_state.as_ref())
+        let invite_was_accepted = existing_record
+            .invite_state
+            .as_ref()
             .map(|invite| invite.status == SpaceInviteStatus::Accepted)
             .unwrap_or(false);
         let removed_by_owner = (was_locally_member || invite_was_accepted)
             && !update.members.iter().any(|member| member == local_device_id);
 
+        if deletion_update || removed_by_owner {
+            return Ok(self.purge_local_space(spaces, &update.space_id));
+        }
+
         {
             let record = self.record_mut(&update.space_id)?;
             record.revision = update.revision;
-            record.owner_enabled = if removed_by_owner { false } else { update.owner_enabled };
-            record.key_epoch = if removed_by_owner { 0 } else { update.key_epoch };
-            if removed_by_owner {
-                record.left = true;
-                record.invite_state = None;
-            }
+            record.owner_enabled = update.owner_enabled;
+            record.key_epoch = update.key_epoch;
         }
 
         let space = space_mut(spaces, &update.space_id)?;
         space.name = update.name;
         space.kind = update.kind;
         space.members = update.members;
-        if removed_by_owner {
-            space.active = false;
-            space.addons.clear();
-        }
         Ok(Some(space.clone()))
     }
 

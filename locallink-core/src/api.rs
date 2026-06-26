@@ -739,6 +739,29 @@ async fn handle_request(
             Ok(serde_json::to_string(&ok(response))?)
         }
 
+        "delete_space" => {
+            let space_id = req
+                .space_id
+                .ok_or_else(|| anyhow::anyhow!("delete_space requires space_id"))?;
+
+            let mut store = spaces.lock().await;
+            let mut membership = load_or_create_space_membership_store()?;
+            membership.ensure_local_records(&store, &cfg.device_id);
+            let (deleted_space, update) =
+                membership.delete_owned_space(&mut store, &cfg.device_id, &space_id)?;
+            let deliveries = broadcast_update(connections.clone(), update.clone(), None).await;
+            membership.validate_and_repair(&mut store)?;
+            save_space_store(&store)?;
+            save_space_membership_store(&membership)?;
+
+            Ok(serde_json::to_string(&ok(serde_json::json!({
+                "space_id": space_id,
+                "deleted_space": deleted_space,
+                "space_update": update,
+                "deliveries": deliveries
+            })))?)
+        }
+
         "list_space_invites" => {
             let mut store = spaces.lock().await;
             let mut membership = load_or_create_space_membership_store()?;

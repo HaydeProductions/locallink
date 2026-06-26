@@ -75,6 +75,9 @@ enum ApiJob {
     LeaveSpace {
         space_id: String,
     },
+    DeleteSpace {
+        space_id: String,
+    },
     PollEvents {
         service: Option<String>,
     },
@@ -456,6 +459,11 @@ impl LocalLinkUi {
             }
             "leave_space" => {
                 self.log("Left space.");
+                self.send_job(ApiJob::Spaces);
+                self.send_job(ApiJob::Addons);
+            }
+            "delete_space" => {
+                self.log("Space deleted.");
                 self.send_job(ApiJob::Spaces);
                 self.send_job(ApiJob::Addons);
             }
@@ -1599,6 +1607,10 @@ fn api_worker(rx: mpsc::Receiver<ApiJob>, tx: mpsc::Sender<UiMsg>) {
                 "cmd": "leave_space",
                 "space_id": space_id
             }),
+            ApiJob::DeleteSpace { space_id } => json!({
+                "cmd": "delete_space",
+                "space_id": space_id
+            }),
             ApiJob::Shutdown => json!({ "cmd": "shutdown" }),
             ApiJob::PollEvents { service } => {
                 let mut req = json!({
@@ -1683,6 +1695,7 @@ fn job_name(job: &ApiJob) -> &'static str {
         ApiJob::AcceptSpaceInvite { .. } => "accept_space_invite",
         ApiJob::DeclineSpaceInvite { .. } => "decline_space_invite",
         ApiJob::LeaveSpace { .. } => "leave_space",
+        ApiJob::DeleteSpace { .. } => "delete_space",
         ApiJob::PollEvents { .. } => "poll_events",
         ApiJob::AddTrusted { .. } => "add_trusted",
         ApiJob::RemoveTrusted { .. } => "remove_trusted",
@@ -2314,8 +2327,7 @@ impl LocalLinkUi {
 
         let device_candidates = self.space_member_candidates();
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for space in self.spaces.clone() {
+        for space in self.spaces.clone() {
                 device_card(ui, |ui| {
                     ui.horizontal_top(|ui| {
                         ui.vertical(|ui| {
@@ -2446,8 +2458,17 @@ impl LocalLinkUi {
                             self.send_job(ApiJob::LeaveSpace { space_id: space.id.clone() });
                         }
 
+                        let can_delete_local_copy = space.local_state == "removed" || space.local_state == "left";
+                        if (space.role == "owner" || can_delete_local_copy) && ui
+                            .add(danger_button(if space.role == "owner" { "Delete Space" } else { "Delete Local Copy" }))
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                        {
+                            self.send_job(ApiJob::DeleteSpace { space_id: space.id.clone() });
+                        }
+
                         ui.label(
-                            egui::RichText::new("Disconnect only affects local activity. Leave exits a foreign group.")
+                            egui::RichText::new("Disconnect only affects local activity. Leave exits a foreign group. Deleted/removed foreign spaces can be cleared locally.")
                                 .color(color_muted())
                                 .size(12.5),
                         );
@@ -2609,7 +2630,6 @@ impl LocalLinkUi {
 
                 ui.add_space(12.0);
             }
-        });
     }
 }
 
