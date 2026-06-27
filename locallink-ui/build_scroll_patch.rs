@@ -1,3 +1,5 @@
+mod build_phase14_ui;
+
 #[allow(dead_code)]
 mod generated_ui_build {
     include!("build.rs");
@@ -16,6 +18,7 @@ fn main() {
     patch_spaces_page_scroll();
     patch_space_service_controls();
     patch_space_purge_control();
+    build_phase14_ui::run();
 }
 
 fn patch_spaces_page_scroll() {
