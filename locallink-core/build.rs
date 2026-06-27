@@ -1,3 +1,5 @@
+mod build_phase14;
+
 use std::fs;
 use std::path::Path;
 
@@ -6,6 +8,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/space_membership.rs");
     patch_membership();
     patch_api();
+    build_phase14::run();
 }
 
 fn patch_membership() {
