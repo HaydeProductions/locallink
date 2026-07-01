@@ -43,6 +43,7 @@ mkdir -p "$DIST/scripts"
 
 cp "$ROOT/target/release/locallink-core.exe" "$DIST/locallink-core.exe"
 cp "$ROOT/target/release/locallink-ui.exe" "$DIST/LocalLink.exe"
+cp "$ROOT/target/release/locallink-debugger.exe" "$DIST/LocalLinkDebugger.exe"
 cp "$ROOT/target/release/locallink-tray.exe" "$DIST/LocalLinkTray.exe"
 cp "$ROOT/scripts/windows-network-check.ps1" "$DIST/scripts/windows-network-check.ps1"
 cp "$ROOT/scripts/windows-network-setup.ps1" "$DIST/scripts/windows-network-setup.ps1"
@@ -108,6 +109,9 @@ Run tray controller:
 Run UI directly:
   ./LocalLink.exe
 
+Run debugger UI:
+  ./LocalLinkDebugger.exe
+
 Run core directly:
   ./locallink-core.exe
 
@@ -116,6 +120,11 @@ Default/debug add-ons are packaged in:
 
 The build script also installs discovered add-ons into:
   %APPDATA%\LocalLink\addons
+
+Diagnostics logs:
+  %APPDATA%\LocalLink\logs\diagnostics.log
+  %APPDATA%\LocalLink\logs\ui-process-*.log
+  %APPDATA%\LocalLink\logs\dev-launch-*.log
 
 Space probe logs:
   %LOCALAPPDATA%\LocalLink\logs\space-probe-*.log
