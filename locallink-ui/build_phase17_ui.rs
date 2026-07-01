@@ -149,23 +149,23 @@ fn patch_space_addon_selection(text: &mut String) {
 }
 
 fn patch_command_diagnostics(text: &mut String) {
-    if text.contains("queue ApiJob for diagnostics") {
+    if text.contains("action ApiJob for diagnostics") {
         return;
     }
 
     *text = text.replace(
         "    fn send_job(&mut self, job: ApiJob) {\n        self.loading_count += 1;",
-        "    fn send_job(&mut self, job: ApiJob) {\n        self.loading_count += 1;\n        eprintln!(\"[ui] queue ApiJob for diagnostics: {:?}\", job);",
+        "    fn send_job(&mut self, job: ApiJob) {\n        self.loading_count += 1;\n        if matches!(job, ApiJob::CreateSpace { .. } | ApiJob::ActivateSpace { .. } | ApiJob::DeactivateSpace { .. } | ApiJob::LeaveSpace { .. } | ApiJob::PurgeSpace { .. } | ApiJob::SetSpaceAddonEnabled { .. }) {\n            eprintln!(\"[ui] action ApiJob for diagnostics: {:?}\", job);\n        }",
     );
 
     *text = text.replace(
         "        let result = api_request(request);",
-        "        eprintln!(\"[ui-api] request job={}\", job_name);\n        let result = api_request(request);",
+        "        let log_api_job = matches!(job_name.as_str(), \"create_space\" | \"activate_space\" | \"deactivate_space\" | \"leave_space\" | \"purge_space\" | \"set_space_addon_enabled\");\n        if log_api_job {\n            eprintln!(\"[ui-api] request job={}\", job_name);\n        }\n        let result = api_request(request);",
     );
 
     *text = text.replace(
         "            Ok(value) => UiMsg::ApiOk {\n                job: job_name,\n                value,\n            },",
-        "            Ok(value) => {\n                eprintln!(\"[ui-api] response job={} ok=true\", job_name);\n                UiMsg::ApiOk {\n                    job: job_name,\n                    value,\n                }\n            },",
+        "            Ok(value) => {\n                if log_api_job {\n                    eprintln!(\"[ui-api] response job={} ok=true\", job_name);\n                }\n                UiMsg::ApiOk {\n                    job: job_name,\n                    value,\n                }\n            },",
     );
 
     *text = text.replace(
