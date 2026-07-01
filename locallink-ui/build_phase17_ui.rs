@@ -14,6 +14,7 @@ pub fn run() {
     patch_jobs(&mut text);
     patch_space_purge_button(&mut text);
     patch_space_addon_selection(&mut text);
+    patch_command_diagnostics(&mut text);
 
     if text != original {
         fs::write(path, text).expect("write phase17 UI source");
@@ -145,4 +146,30 @@ fn patch_space_addon_selection(text: &mut String) {
     let replacement = "                    ui.add_space(10.0);\n\n                    // Phase17 local add-on selection\n                    glass_panel(ui, |ui| {\n                        ui.heading(egui::RichText::new(\"Add-on selection\").color(color_text()).size(16.0));\n                        ui.label(\n                            egui::RichText::new(\"Choose which installed add-ons run for this local space or direct connection context.\")\n                                .color(color_muted())\n                                .size(12.5),\n                        );\n\n                        if self.addons.is_empty() {\n                            ui.add_space(6.0);\n                            ui.label(\n                                egui::RichText::new(\"No add-ons installed. Build/install add-ons, then reload or restart Core.\")\n                                    .color(color_muted())\n                                    .size(12.5),\n                            );\n                        } else {\n                            let can_manage_local_addons = matches!(space.local_state.as_str(), \"owned\" | \"joined\" | \"direct\");\n\n                            for addon in self.addons.clone() {\n                                ui.separator();\n                                ui.horizontal_wrapped(|ui| {\n                                    ui.vertical(|ui| {\n                                        ui.label(egui::RichText::new(&addon.name).color(color_text()).strong());\n                                        ui.label(\n                                            egui::RichText::new(format!(\"{} · {}\", addon.id, addon.services.join(\", \")))\n                                                .color(color_muted())\n                                                .size(12.0),\n                                        );\n                                    });\n\n                                    if can_manage_local_addons {\n                                        if ui\n                                            .add(primary_button(\"Enable\"))\n                                            .on_hover_cursor(egui::CursorIcon::PointingHand)\n                                            .clicked()\n                                        {\n                                            self.send_job(ApiJob::SetSpaceAddonEnabled {\n                                                space_id: space.id.clone(),\n                                                addon_id: addon.id.clone(),\n                                                enabled: true,\n                                            });\n                                        }\n\n                                        if ui\n                                            .add(danger_button(\"Disable\"))\n                                            .on_hover_cursor(egui::CursorIcon::PointingHand)\n                                            .clicked()\n                                        {\n                                            self.send_job(ApiJob::SetSpaceAddonEnabled {\n                                                space_id: space.id.clone(),\n                                                addon_id: addon.id.clone(),\n                                                enabled: false,\n                                            });\n                                        }\n                                    } else {\n                                        state_chip(ui, \"Unavailable\", color_muted());\n                                    }\n                                });\n                            }\n                        }\n                    });\n\n                    ui.add_space(10.0);\n\n                    glass_panel(ui, |ui| {\n                        ui.heading(egui::RichText::new(\"Members\").color(color_text()).size(16.0));";
 
     *text = text.replace(marker, replacement);
+}
+
+fn patch_command_diagnostics(text: &mut String) {
+    if text.contains("queue ApiJob for diagnostics") {
+        return;
+    }
+
+    *text = text.replace(
+        "    fn send_job(&mut self, job: ApiJob) {\n        self.loading_count += 1;",
+        "    fn send_job(&mut self, job: ApiJob) {\n        self.loading_count += 1;\n        eprintln!(\"[ui] queue ApiJob for diagnostics: {:?}\", job);",
+    );
+
+    *text = text.replace(
+        "        let result = api_request(request);",
+        "        eprintln!(\"[ui-api] request job={}\", job_name);\n        let result = api_request(request);",
+    );
+
+    *text = text.replace(
+        "            Ok(value) => UiMsg::ApiOk {\n                job: job_name,\n                value,\n            },",
+        "            Ok(value) => {\n                eprintln!(\"[ui-api] response job={} ok=true\", job_name);\n                UiMsg::ApiOk {\n                    job: job_name,\n                    value,\n                }\n            },",
+    );
+
+    *text = text.replace(
+        "            Err(error) => UiMsg::ApiErr {\n                job: job_name,\n                error: error.to_string(),\n            },",
+        "            Err(error) => {\n                eprintln!(\"[ui-api] response job={} ok=false error={}\", job_name, error);\n                UiMsg::ApiErr {\n                    job: job_name,\n                    error: error.to_string(),\n                }\n            },",
+    );
 }
