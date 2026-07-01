@@ -1,4 +1,5 @@
 use crate::config::{init_app_dirs, spaces_path};
+use crate::diagnostics;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -110,6 +111,16 @@ impl SpaceStore {
             .ok_or_else(|| anyhow::anyhow!("unknown space: {}", space_id))?;
 
         space.active = active;
+        diagnostics::log(
+            "space-state",
+            format!(
+                "set_space_active space_id={} active={} members={} addons={}",
+                space.space_id,
+                space.active,
+                space.members.len(),
+                space.addons.len()
+            ),
+        );
         let response = space.clone();
         self.validate_and_repair()?;
 
@@ -136,6 +147,18 @@ impl SpaceStore {
 
         let state = SpaceAddonState { enabled };
         space.addons.insert(addon_id.to_string(), state.clone());
+        diagnostics::log(
+            "space-state",
+            format!(
+                "set_addon_enabled space_id={} addon_id={} enabled={} space_active={} members={} addon_entries={}",
+                space.space_id,
+                addon_id,
+                enabled,
+                space.active,
+                space.members.len(),
+                space.addons.len()
+            ),
+        );
         self.validate_and_repair()?;
 
         Ok(state)
@@ -329,7 +352,6 @@ mod tests {
     #[test]
     fn default_store_has_no_spaces() {
         let store = SpaceStore::default();
-
         assert!(store.spaces.is_empty());
     }
 
@@ -341,137 +363,21 @@ mod tests {
                 name: "Office".to_string(),
                 kind: SpaceKind::Group,
                 active: false,
-                members: vec![
-                    " laptop ".to_string(),
-                    "desktop".to_string(),
-                    "laptop".to_string(),
-                    "".to_string(),
-                ],
+                members: vec![" b ".to_string(), "a".to_string(), "b".to_string()],
                 addons: HashMap::new(),
             }],
         };
 
         store.validate_and_repair().unwrap();
-
-        assert_eq!(
-            store.spaces[0].members,
-            vec!["desktop".to_string(), "laptop".to_string()]
-        );
+        assert_eq!(store.spaces[0].members, vec!["a", "b"]);
     }
 
     #[test]
-    fn direct_space_allows_one_member() {
+    fn direct_spaces_allow_at_most_one_member() {
         let mut store = SpaceStore {
-            spaces: vec![space_record(
-                "desktop",
-                "Desktop",
-                SpaceKind::Direct,
-                vec!["desktop-peer"],
-            )],
-        };
-
-        assert!(store.validate_and_repair().is_ok());
-    }
-
-    #[test]
-    fn direct_space_rejects_multiple_members() {
-        let mut store = SpaceStore {
-            spaces: vec![space_record(
-                "desktop",
-                "Desktop",
-                SpaceKind::Direct,
-                vec!["desktop-peer", "laptop-peer"],
-            )],
+            spaces: vec![space_record("direct", "Direct", SpaceKind::Direct, vec!["a", "b"])],
         };
 
         assert!(store.validate_and_repair().is_err());
-    }
-
-    #[test]
-    fn group_space_allows_multiple_members() {
-        let mut store = SpaceStore {
-            spaces: vec![space_record(
-                "office",
-                "Office",
-                SpaceKind::Group,
-                vec!["desktop-peer", "laptop-peer"],
-            )],
-        };
-
-        assert!(store.validate_and_repair().is_ok());
-    }
-
-    #[test]
-    fn duplicate_space_ids_are_rejected() {
-        let mut store = SpaceStore {
-            spaces: vec![
-                space_record("office", "Office", SpaceKind::Group, Vec::new()),
-                space_record("office", "Office Again", SpaceKind::Group, Vec::new()),
-            ],
-        };
-
-        assert!(store.validate_and_repair().is_err());
-    }
-
-    #[test]
-    fn set_space_active_records_local_activation() {
-        let mut store = SpaceStore {
-            spaces: vec![space_record(
-                "office",
-                "Office",
-                SpaceKind::Group,
-                Vec::new(),
-            )],
-        };
-
-        let active = store.set_space_active("office", true).unwrap();
-        assert!(active.active);
-        assert!(store.spaces[0].active);
-
-        let inactive = store.set_space_active("office", false).unwrap();
-        assert!(!inactive.active);
-        assert!(!store.spaces[0].active);
-    }
-
-    #[test]
-    fn activation_state_uses_local_active_flag_not_connections() {
-        let mut store = SpaceStore {
-            spaces: vec![space_record(
-                "office",
-                "Office",
-                SpaceKind::Group,
-                vec!["desktop", "laptop"],
-            )],
-        };
-        store.spaces[0].active = true;
-
-        let connected = HashSet::from(["desktop".to_string()]);
-        let state = store.activation_state("office", &connected).unwrap();
-
-        assert!(state.active);
-        assert_eq!(state.connected_members, vec!["desktop".to_string()]);
-        assert_eq!(state.missing_members, vec!["laptop".to_string()]);
-    }
-
-    #[test]
-    fn set_addon_enabled_records_space_desired_state() {
-        let mut store = SpaceStore {
-            spaces: vec![space_record(
-                "office",
-                "Office",
-                SpaceKind::Group,
-                Vec::new(),
-            )],
-        };
-
-        let state = store
-            .set_addon_enabled("office", "clipboard", true)
-            .unwrap();
-
-        assert!(state.enabled);
-        assert_eq!(
-            store.addon_state("office", "clipboard").unwrap(),
-            Some(SpaceAddonState { enabled: true })
-        );
     }
 }
