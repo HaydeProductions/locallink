@@ -11,6 +11,23 @@ It is not a product feature. It exists to answer these questions in order:
 5. Does the other device receive a `space_service_data` event with the expected `space_id`?
 6. Do per-instance event cursors work correctly?
 
+## Source layout
+
+The probe lives with the other bundled/default add-ons:
+
+```text
+addons/space-probe/
+  Cargo.toml
+  manifest.json
+  src/main.rs
+```
+
+Build scripts discover add-ons by scanning:
+
+```text
+addons/*/manifest.json
+```
+
 ## Build/install
 
 From the repo root:
@@ -25,10 +42,10 @@ or on Windows PowerShell:
 .\scripts\build-release.ps1
 ```
 
-Both scripts build `locallink-addon-space-probe.exe`, package it into `dist\LocalLink\addons\space-probe`, and install it into:
+Both scripts build all workspace add-ons, package discovered add-ons into `dist\LocalLink\addons\<id>`, and install discovered add-ons into:
 
 ```text
-%APPDATA%\LocalLink\addons\space-probe
+%APPDATA%\LocalLink\addons\<id>
 ```
 
 Core loads add-ons from AppData, so the AppData install is the important part for live debugging.
