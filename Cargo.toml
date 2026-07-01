@@ -5,5 +5,6 @@ members = [
     "locallink-ui",
     "locallink-tray",
     "locallink-addon-echo",
-    "locallink-addon-clipboard"
+    "locallink-addon-clipboard",
+    "locallink-addon-space-probe"
 ]
