@@ -2,7 +2,47 @@ $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent $PSScriptRoot
 $Dist = Join-Path $Root "dist\LocalLink"
-$UserSpaceProbeDir = Join-Path ([Environment]::GetFolderPath("ApplicationData")) "LocalLink\addons\space-probe"
+$DefaultAddonsRoot = Join-Path $Root "addons"
+$UserAddonsRoot = Join-Path ([Environment]::GetFolderPath("ApplicationData")) "LocalLink\addons"
+
+function Get-AddonManifests {
+    if (!(Test-Path $DefaultAddonsRoot)) {
+        throw "Add-ons folder not found: $DefaultAddonsRoot"
+    }
+
+    $manifests = @(Get-ChildItem -Path $DefaultAddonsRoot -Directory |
+        ForEach-Object { Join-Path $_.FullName "manifest.json" } |
+        Where-Object { Test-Path $_ })
+
+    if ($manifests.Count -eq 0) {
+        throw "No add-on manifests found under $DefaultAddonsRoot"
+    }
+
+    return $manifests
+}
+
+function Install-AddonFromManifest($ManifestPath, $DestRoot) {
+    $manifest = Get-Content $ManifestPath -Raw | ConvertFrom-Json
+    $id = [string]$manifest.id
+    $exe = [string]$manifest.executable
+
+    if ([string]::IsNullOrWhiteSpace($id) -or [string]::IsNullOrWhiteSpace($exe)) {
+        throw "Add-on manifest must contain id and executable: $ManifestPath"
+    }
+
+    $builtExe = Join-Path $Root "target\release\$exe"
+    if (!(Test-Path $builtExe)) {
+        throw "Built add-on binary not found: $builtExe"
+    }
+
+    $addonDir = Join-Path $DestRoot $id
+    New-Item -ItemType Directory -Force -Path $addonDir | Out-Null
+    Copy-Item $builtExe (Join-Path $addonDir $exe) -Force
+    Copy-Item $ManifestPath (Join-Path $addonDir "manifest.json") -Force
+
+    Write-Host "Installed add-on $id to:"
+    Write-Host $addonDir
+}
 
 Write-Host "Building LocalLink workspace release..."
 Push-Location $Root
@@ -18,35 +58,19 @@ if (Test-Path $Dist) {
 }
 
 New-Item -ItemType Directory -Force -Path $Dist | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $Dist "addons\clipboard-sync") | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $Dist "addons\space-probe") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $Dist "addons") | Out-Null
+New-Item -ItemType Directory -Force -Path $UserAddonsRoot | Out-Null
 
 Copy-Item (Join-Path $Root "target\release\locallink-core.exe") (Join-Path $Dist "locallink-core.exe") -Force
 Copy-Item (Join-Path $Root "target\release\locallink-ui.exe") (Join-Path $Dist "LocalLink.exe") -Force
-Copy-Item (Join-Path $Root "target\release\locallink-addon-clipboard.exe") (Join-Path $Dist "addons\clipboard-sync\locallink-addon-clipboard.exe") -Force
-Copy-Item (Join-Path $Root "target\release\locallink-addon-space-probe.exe") (Join-Path $Dist "addons\space-probe\locallink-addon-space-probe.exe") -Force
-
-@"
-{
-  "id": "clipboard-sync",
-  "name": "Clipboard Sync",
-  "version": "0.1.0",
-  "description": "Keeps text clipboards synchronized across connected LocalLink devices. Newest clipboard wins.",
-  "executable": "locallink-addon-clipboard.exe",
-  "services": [
-    "clipboard-sync"
-  ],
-  "enabled": false
+if (Test-Path (Join-Path $Root "target\release\locallink-tray.exe")) {
+    Copy-Item (Join-Path $Root "target\release\locallink-tray.exe") (Join-Path $Dist "LocalLinkTray.exe") -Force
 }
-"@ | Set-Content (Join-Path $Dist "addons\clipboard-sync\manifest.json")
 
-Copy-Item (Join-Path $Root "locallink-addon-space-probe\manifest.json") (Join-Path $Dist "addons\space-probe\manifest.json") -Force
-
-New-Item -ItemType Directory -Force -Path $UserSpaceProbeDir | Out-Null
-Copy-Item (Join-Path $Root "target\release\locallink-addon-space-probe.exe") (Join-Path $UserSpaceProbeDir "locallink-addon-space-probe.exe") -Force
-Copy-Item (Join-Path $Root "locallink-addon-space-probe\manifest.json") (Join-Path $UserSpaceProbeDir "manifest.json") -Force
-Write-Host "Installed debug add-on space-probe to:"
-Write-Host $UserSpaceProbeDir
+foreach ($manifestPath in Get-AddonManifests) {
+    Install-AddonFromManifest $manifestPath (Join-Path $Dist "addons")
+    Install-AddonFromManifest $manifestPath $UserAddonsRoot
+}
 
 @"
 LocalLink development package
@@ -57,11 +81,11 @@ Run UI:
 Run core directly:
   .\locallink-core.exe
 
-Run clipboard sync addon:
-  .\addons\clipboard-sync\locallink-addon-clipboard.exe
+Default/debug add-ons are packaged in:
+  .\addons
 
-Run space probe debug addon:
-  .\addons\space-probe\locallink-addon-space-probe.exe
+The release script also installs discovered add-ons into:
+  %APPDATA%\LocalLink\addons
 
 Space probe logs:
   %LOCALAPPDATA%\LocalLink\logs\space-probe-*.log
@@ -73,3 +97,5 @@ AppData:
 
 Write-Host "Built package at:"
 Write-Host $Dist
+Write-Host "Updated add-ons under:"
+Write-Host $UserAddonsRoot
