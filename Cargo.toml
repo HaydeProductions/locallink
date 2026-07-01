@@ -4,7 +4,7 @@ members = [
     "locallink-core",
     "locallink-ui",
     "locallink-tray",
-    "locallink-addon-echo",
-    "locallink-addon-clipboard",
-    "locallink-addon-space-probe"
+    "addons/echo",
+    "addons/clipboard-sync",
+    "addons/space-probe"
 ]
