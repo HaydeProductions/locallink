@@ -34,6 +34,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     init_app_dirs()?;
+    diagnostics::log("core", "LocalLink Core process starting");
 
     let args: Vec<String> = std::env::args().collect();
 
@@ -85,6 +86,17 @@ async fn main() -> Result<()> {
     let runtime_state = load_core_runtime_state(loaded_addons)?;
     let loaded_space_count = runtime_state.spaces.lock().await.spaces.len();
 
+    diagnostics::log(
+        "core",
+        format!(
+            "loaded config device_id={} addons={} spaces={} config={}",
+            cfg.device_id,
+            loaded_addon_count,
+            loaded_space_count,
+            config_path()?.display()
+        ),
+    );
+
     println!("LocalLink core prototype");
     println!("Version:     {}", env!("CARGO_PKG_VERSION"));
     println!("Device name: {}", cfg.device_name);
@@ -124,6 +136,7 @@ async fn main() -> Result<()> {
         if let Err(err) =
             tcp_server(cfg_server, opts_server, connections_server, events_server).await
         {
+            diagnostics::log("transport", format!("TCP server error: {err}"));
             eprintln!("TCP server error: {err}");
         }
     });
@@ -154,6 +167,7 @@ async fn main() -> Result<()> {
         )
         .await
         {
+            diagnostics::log("api", format!("Local API error: {err}"));
             eprintln!("Local API error: {err}");
         }
     });
@@ -172,6 +186,8 @@ async fn main() -> Result<()> {
 
 fn start_addon_process_manager(state: CoreRuntimeState) {
     tokio::spawn(async move {
+        diagnostics::log("addon-manager", "space add-on process manager started");
+
         let mut children = HashMap::<String, Child>::new();
         let mut suppressed_until_space_change = HashSet::<String>::new();
 
@@ -181,6 +197,19 @@ fn start_addon_process_manager(state: CoreRuntimeState) {
                 api::LOCAL_API_ADDR,
             )
             .await;
+
+            if !action_plan.start.is_empty() || !action_plan.stop.is_empty() {
+                diagnostics::log(
+                    "addon-manager",
+                    format!(
+                        "runtime action plan start={} keep={} stop={} suppressed={}",
+                        action_plan.start.len(),
+                        action_plan.keep.len(),
+                        action_plan.stop.len(),
+                        suppressed_until_space_change.len()
+                    ),
+                );
+            }
 
             let wanted: HashSet<String> = action_plan
                 .start
@@ -197,6 +226,7 @@ fn start_addon_process_manager(state: CoreRuntimeState) {
                 if let Some(mut child) = children.remove(&id) {
                     let _ = child.kill();
                     let _ = child.wait();
+                    diagnostics::log("addon-manager", format!("stopped add-on instance={id}"));
                     eprintln!("Stopped add-on: {id}");
                 }
 
@@ -207,9 +237,21 @@ fn start_addon_process_manager(state: CoreRuntimeState) {
 
             for id in running_ids {
                 let exited = match children.get_mut(&id).map(|child| child.try_wait()) {
-                    Some(Ok(Some(_))) => true,
+                    Some(Ok(Some(status))) => {
+                        diagnostics::log(
+                            "addon-manager",
+                            format!("add-on exited instance={id} status={status}"),
+                        );
+                        true
+                    }
                     Some(Ok(None)) => false,
-                    Some(Err(_)) => true,
+                    Some(Err(err)) => {
+                        diagnostics::log(
+                            "addon-manager",
+                            format!("add-on try_wait failed instance={id} error={err}"),
+                        );
+                        true
+                    }
                     None => false,
                 };
 
@@ -231,6 +273,10 @@ fn start_addon_process_manager(state: CoreRuntimeState) {
 
                         state.space_addon_instances.lock().await.mark_absent(&id);
 
+                        diagnostics::log(
+                            "addon-manager",
+                            format!("stopped add-on instance={id}; no longer wanted"),
+                        );
                         eprintln!("Stopped add-on: {id}");
                     }
                 }
@@ -241,6 +287,10 @@ fn start_addon_process_manager(state: CoreRuntimeState) {
                     state.space_addon_instances.lock().await.mark_present(id);
                 } else {
                     state.space_addon_instances.lock().await.mark_absent(&id);
+                    diagnostics::log(
+                        "addon-manager",
+                        format!("expected running add-on instance={id}, but process table is missing it"),
+                    );
                 }
             }
 
@@ -248,11 +298,30 @@ fn start_addon_process_manager(state: CoreRuntimeState) {
                 let id = context.instance_id.clone();
 
                 if children.contains_key(&id) || suppressed_until_space_change.contains(&id) {
+                    diagnostics::log(
+                        "addon-manager",
+                        format!("start skipped instance={id}; already running or suppressed"),
+                    );
                     continue;
                 }
 
+                diagnostics::log(
+                    "addon-manager",
+                    format!(
+                        "starting add-on instance={} addon={} exe={} env={}",
+                        context.instance_id,
+                        context.addon_id,
+                        context.executable,
+                        addon_env_summary(&context)
+                    ),
+                );
+
                 match launch_core_owned_addon(&context) {
                     Ok(child) => {
+                        diagnostics::log(
+                            "addon-manager",
+                            format!("started add-on instance={id} pid={}", child.id()),
+                        );
                         eprintln!("Started add-on: {id}");
 
                         state
@@ -267,6 +336,15 @@ fn start_addon_process_manager(state: CoreRuntimeState) {
                         state.space_addon_instances.lock().await.mark_absent(&id);
 
                         suppressed_until_space_change.insert(id.clone());
+
+                        diagnostics::log(
+                            "addon-manager",
+                            format!(
+                                "could not start add-on instance={id} addon={} exe={} error={err}",
+                                context.addon_id,
+                                context.executable
+                            ),
+                        );
 
                         eprintln!(
                             "Could not start add-on {id}: {err}. It will not be retried until its space state changes."
@@ -283,6 +361,16 @@ fn start_addon_process_manager(state: CoreRuntimeState) {
 fn launch_core_owned_addon(context: &SpaceAddonRuntimeContext) -> Result<Child> {
     let exe_path = Path::new(&context.executable);
 
+    diagnostics::log(
+        "addon-launch",
+        format!(
+            "checking executable instance={} addon={} path={}",
+            context.instance_id,
+            context.addon_id,
+            exe_path.display()
+        ),
+    );
+
     if !exe_path.exists() {
         anyhow::bail!("add-on executable not found: {}", exe_path.display());
     }
@@ -290,6 +378,10 @@ fn launch_core_owned_addon(context: &SpaceAddonRuntimeContext) -> Result<Child> 
     let mut command = Command::new(exe_path);
 
     if let Some(addon_dir) = exe_path.parent() {
+        diagnostics::log(
+            "addon-launch",
+            format!("current_dir={} instance={}", addon_dir.display(), context.instance_id),
+        );
         command.current_dir(addon_dir);
     }
 
@@ -303,4 +395,23 @@ fn launch_core_owned_addon(context: &SpaceAddonRuntimeContext) -> Result<Child> 
     command.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
     Ok(command.spawn()?)
+}
+
+fn addon_env_summary(context: &SpaceAddonRuntimeContext) -> String {
+    let mut parts = Vec::new();
+
+    for key in [
+        "LOCALLINK_ADDON_ID",
+        "LOCALLINK_ADDON_INSTANCE_ID",
+        "LOCALLINK_CORE_API_ADDR",
+        "LOCALLINK_SPACE_ID",
+        "LOCALLINK_SPACE_KIND",
+        "LOCALLINK_SPACE_NAME",
+        "LOCALLINK_CONNECTED_MEMBERS",
+    ] {
+        let value = context.env.get(key).cloned().unwrap_or_default();
+        parts.push(format!("{key}={value:?}"));
+    }
+
+    parts.join(" ")
 }
