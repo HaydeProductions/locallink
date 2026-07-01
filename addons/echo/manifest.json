@@ -1,0 +1,12 @@
+{
+  "id": "echo",
+  "name": "Echo",
+  "version": "0.1.0",
+  "description": "Test add-on that replies to LocalLink echo service messages.",
+  "executable": "locallink-addon-echo.exe",
+  "services": [
+    "test.echo",
+    "test.echo.reply"
+  ],
+  "enabled": false
+}
