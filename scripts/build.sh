@@ -4,7 +4,26 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST="$ROOT/dist/LocalLink"
 DEFAULT_ADDONS_ROOT="$ROOT/addons"
-APPDATA_ROOT="${APPDATA:-${LOCALAPPDATA:-}}"
+
+resolve_appdata_root() {
+  local root=""
+
+  if command -v powershell.exe >/dev/null 2>&1; then
+    root="$(powershell.exe -NoProfile -Command '[Environment]::GetFolderPath("ApplicationData")' 2>/dev/null | tr -d '\r' | tail -n 1)"
+  fi
+
+  if [[ -z "$root" ]]; then
+    root="${APPDATA:-${LOCALAPPDATA:-}}"
+  fi
+
+  if [[ -n "$root" ]] && command -v cygpath >/dev/null 2>&1; then
+    root="$(cygpath -u "$root")"
+  fi
+
+  printf '%s' "$root"
+}
+
+APPDATA_ROOT="$(resolve_appdata_root)"
 
 json_value() {
   local file="$1"
@@ -44,6 +63,7 @@ if [[ -z "$APPDATA_ROOT" ]]; then
 else
   USER_ADDONS="$APPDATA_ROOT/LocalLink/addons"
   mkdir -p "$USER_ADDONS"
+  echo "Resolved LocalLink user add-ons directory: $USER_ADDONS"
 fi
 
 for manifest in "${addon_manifests[@]}"; do
