@@ -1,0 +1,11 @@
+{
+  "id": "clipboard-sync",
+  "name": "Clipboard Sync",
+  "version": "0.1.0",
+  "description": "Keeps text clipboards synchronized across connected LocalLink devices. Newest clipboard wins.",
+  "executable": "locallink-addon-clipboard.exe",
+  "services": [
+    "clipboard-sync"
+  ],
+  "enabled": false
+}
