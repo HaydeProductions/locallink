@@ -9,6 +9,7 @@ pub fn run() {
         .replace("\r\n", "\n");
     let original = text.clone();
 
+    patch_spaces_page_scroll(&mut text);
     patch_addon_count(&mut text);
     patch_jobs(&mut text);
     patch_space_purge_button(&mut text);
@@ -16,6 +17,43 @@ pub fn run() {
 
     if text != original {
         fs::write(path, text).expect("write phase17 UI source");
+    }
+}
+
+fn patch_spaces_page_scroll(text: &mut String) {
+    let Some(start) = text.find("    fn screen_spaces(&mut self, ui: &mut egui::Ui) {") else {
+        return;
+    };
+
+    let open_pat = "        egui::ScrollArea::vertical().show(ui, |ui| {\n            for space in self.spaces.clone() {";
+    let open_repl = "        for space in self.spaces.clone() {";
+    let Some(open_at) = text[start..].find(open_pat).map(|offset| start + offset) else {
+        return;
+    };
+
+    *text = format!(
+        "{}{}{}",
+        &text[..open_at],
+        open_repl,
+        &text[open_at + open_pat.len()..]
+    );
+
+    let marker = "\nimpl LocalLinkUi {\n    fn network_requirements_panel";
+    let search_end = text[open_at..]
+        .find(marker)
+        .map(|offset| open_at + offset)
+        .or_else(|| text[open_at..].find("\nfn run_network_repair").map(|offset| open_at + offset))
+        .unwrap_or(text.len());
+
+    let close_pat = "\n            }\n        });\n    }\n}";
+    let close_repl = "\n            }\n    }\n}";
+    if let Some(close_at) = text[..search_end].rfind(close_pat) {
+        *text = format!(
+            "{}{}{}",
+            &text[..close_at],
+            close_repl,
+            &text[close_at + close_pat.len()..]
+        );
     }
 }
 
