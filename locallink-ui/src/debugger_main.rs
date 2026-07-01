@@ -165,7 +165,7 @@ impl DebuggerApp {
             collect_matching(&mut files, &local_probe_root, SourceKind::SpaceProbe, |name| name.starts_with("space-probe-") && name.ends_with(".log"));
         }
 
-        files.sort_by(|a, b| modified_ms(&b.path).cmp(&modified_ms(&a.path)));
+        files.sort_by(|a, b| modified_age_ms(&a.path).cmp(&modified_age_ms(&b.path)));
         files.truncate(12);
         files
     }
@@ -373,7 +373,7 @@ fn local_probe_log_root() -> PathBuf {
         .join("logs")
 }
 
-fn modified_ms(path: &Path) -> u128 {
+fn modified_age_ms(path: &Path) -> u128 {
     fs::metadata(path)
         .and_then(|meta| meta.modified())
         .ok()
