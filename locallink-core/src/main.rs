@@ -9,6 +9,7 @@ mod addons;
 mod api;
 mod api_client;
 mod config;
+mod diagnostics;
 mod discovery;
 mod protocol;
 mod transport;
