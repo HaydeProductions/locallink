@@ -17,7 +17,7 @@ resolve_appdata_root() {
   fi
 
   if [[ -n "$root" ]] && command -v cygpath >/dev/null 2>&1; then
-    root="$(cygpath -u "$root")"
+    root="$(cygpath -u "$root" 2>/dev/null || printf '%s' "$root")"
   fi
 
   printf '%s' "$root"
